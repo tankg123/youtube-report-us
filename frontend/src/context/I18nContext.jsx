@@ -4,7 +4,7 @@ const I18nContext = createContext(null);
 
 export const translations = {
   en: {
-    appTitle: "YT Dashboard",
+    appTitle: "ANS Network",
     appSubtitle: "Channel Manager",
     channel: "Channel",
     video: "Video",
@@ -50,7 +50,7 @@ export const translations = {
     errorDelete: "Could not delete data"
   },
   vi: {
-    appTitle: "YT Dashboard",
+    appTitle: "ANS Network",
     appSubtitle: "Quản lý kênh",
     channel: "Kênh",
     video: "Video",

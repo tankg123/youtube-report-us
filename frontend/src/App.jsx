@@ -7,7 +7,7 @@ import {
   useLocation,
   Navigate
 } from "react-router-dom";
-import { BriefcaseBusiness, Building2, ChevronDown, CircleDollarSign, FileSpreadsheet, Menu, Network, Percent, Users, UsersRound, Video, UserRound, Loader2 } from "lucide-react";
+import { BriefcaseBusiness, Building2, ChevronDown, CircleDollarSign, FileSpreadsheet, Network, Percent, Users, UsersRound, Video, UserRound, Loader2 } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import ChannelManagementPage from "./pages/ChannelManagementPage";
@@ -107,7 +107,7 @@ function MobileNav() {
     <div className="lg:hidden sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-3">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 font-black text-slate-900">
-          <Menu size={22} />
+          <img src="/ans-logo.png" alt="ANS Network" className="h-8 w-8 object-contain" />
           {t("appTitle")}
         </div>
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { LockKeyhole, Mail, Loader2, ShieldCheck } from "lucide-react";
+import { LockKeyhole, Mail, Loader2 } from "lucide-react";
 import api from "../api/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -53,16 +53,16 @@ export default function LoginPage() {
       <div className="w-full max-w-[1100px] grid grid-cols-1 lg:grid-cols-2 bg-white rounded-[32px] shadow-2xl overflow-hidden border border-slate-200">
         <div className="hidden lg:flex bg-[#0f172a] text-white p-12 flex-col justify-between">
           <div>
-            <div className="w-14 h-14 rounded-3xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/40 mb-8">
-              <ShieldCheck size={30} />
+            <div className="w-20 h-20 rounded-3xl bg-white flex items-center justify-center shadow-lg shadow-slate-950/30 mb-8 overflow-hidden">
+              <img src="/ans-logo.png" alt="ANS Network" className="w-16 h-16 object-contain" />
             </div>
 
             <h1 className="text-4xl font-black leading-tight">
-              YouTube Channel Dashboard
+              ANS Network
             </h1>
 
             <p className="text-slate-300 mt-5 text-lg">
-              Quản lý channel, phân quyền user và bảo vệ dữ liệu bằng hệ thống đăng nhập JWT.
+              YouTube channel, report, partner, and revenue management platform.
             </p>
           </div>
 

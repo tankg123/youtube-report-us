@@ -7,7 +7,6 @@ import {
   CircleDollarSign,
   Crown,
   FileSpreadsheet,
-  LayoutDashboard,
   LogOut,
   Network,
   Percent,
@@ -58,8 +57,8 @@ export default function Sidebar() {
   return (
     <aside className="w-[260px] h-screen sticky top-0 bg-[#0f172a] text-white p-5 hidden lg:flex flex-col overflow-hidden">
       <div className="flex items-center gap-3 mb-8">
-        <div className="w-11 h-11 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/40">
-          <LayoutDashboard size={24} />
+        <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-slate-950/20 overflow-hidden">
+          <img src="/ans-logo.png" alt="ANS Network" className="w-10 h-10 object-contain" />
         </div>
 
         <div>
