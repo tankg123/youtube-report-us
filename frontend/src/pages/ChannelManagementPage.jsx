@@ -23,6 +23,7 @@ export default function ChannelManagementPage() {
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState("");
   const [toast, setToast] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -33,6 +34,8 @@ export default function ChannelManagementPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [bulkText, setBulkText] = useState("");
+  const [bulkPreview, setBulkPreview] = useState([]);
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false);
   const [bulkForm, setBulkForm] = useState({
     network_id: "",
     partner_id: "",
@@ -122,7 +125,8 @@ export default function ChannelManagementPage() {
     try {
       setSaving(true);
       const res = await api.post("/channels/management/bulk", { channel_inputs: bulkText, ...bulkForm });
-      setMessage(`${res.data.message || "Channels created"}${res.data.errors?.length ? `, ${res.data.errors.length} errors` : ""}`);
+      const firstError = res.data.errors?.[0]?.error;
+      setMessage(`${res.data.message || "Channels created"}${res.data.errors?.length ? `, ${res.data.errors.length} errors${firstError ? `: ${firstError}` : ""}` : ""}`);
       setBulkOpen(false);
       setBulkText("");
       await fetchData();
@@ -130,6 +134,22 @@ export default function ChannelManagementPage() {
       setMessage(error.response?.data?.message || error.response?.data?.error || "Could not create channels");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function syncManagedChannels() {
+    if (!window.confirm("Sync status, subscribers, views, and video count for all Channel Management channels?")) return;
+
+    try {
+      setSyncing(true);
+      const res = await api.post("/channels/management/sync-basic");
+      const firstError = res.data.errors?.[0]?.error;
+      setMessage(`${res.data.message || "Sync completed"}${res.data.errors?.length ? `, ${res.data.errors.length} errors${firstError ? `: ${firstError}` : ""}` : ""}`);
+      await fetchData();
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.response?.data?.error || "Could not sync managed channels");
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -313,6 +333,50 @@ export default function ChannelManagementPage() {
   }, [channels.length, page, pageSize]);
 
   const previewChannels = useMemo(() => bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean), [bulkText]);
+
+  useEffect(() => {
+    if (!bulkOpen || !previewChannels.length) {
+      setBulkPreview([]);
+      setBulkPreviewLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setBulkPreviewLoading(true);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await api.post("/channels/management/preview", { channel_inputs: bulkText });
+        if (active) setBulkPreview(res.data.data || []);
+      } catch (error) {
+        if (active) {
+          setBulkPreview(previewChannels.map((input) => ({
+            input,
+            channel_id: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+            title: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+            thumbnail: "",
+            subscriber_count: 0,
+            view_count: 0,
+            video_count: 0,
+            status: "error",
+            status_error: error.response?.data?.message || "Could not preview channel"
+          })));
+        }
+      } finally {
+        if (active) setBulkPreviewLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [bulkOpen, bulkText, previewChannels]);
+
+  function removeBulkPreviewAt(index) {
+    setBulkText(previewChannels.filter((_, itemIndex) => itemIndex !== index).join("\n"));
+  }
+
   const paginatedChannels = useMemo(() => {
     const start = (page - 1) * pageSize;
     return channels.slice(start, start + pageSize);
@@ -330,7 +394,15 @@ export default function ChannelManagementPage() {
               <p className="text-sm text-slate-500 mt-1">Manage <b>{channels.length}</b> channels</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => fetchData()} className="px-4 py-2 rounded-xl border border-slate-200 bg-white font-bold text-sm flex items-center gap-2"><RefreshCw size={16} /> Reset</button>
+              <button onClick={() => fetchData()} className="px-4 py-2 rounded-xl border border-slate-200 bg-white font-bold text-sm flex items-center gap-2"><RefreshCw size={16} /> Refresh</button>
+              <button
+                onClick={syncManagedChannels}
+                disabled={syncing}
+                className="px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 font-bold text-sm flex items-center gap-2 disabled:opacity-60"
+              >
+                {syncing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                Sync
+              </button>
               <button className="px-4 py-2 rounded-xl border border-slate-200 bg-white font-bold text-sm flex items-center gap-2"><Download size={16} /> Export</button>
               <button onClick={() => setBulkOpen(true)} className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-sm flex items-center gap-2"><Plus size={16} /> Add Channel</button>
               <button className="px-4 py-2 rounded-xl border border-slate-200 bg-white font-bold text-sm flex items-center gap-2"><Filter size={16} /> Filters</button>
@@ -533,14 +605,59 @@ export default function ChannelManagementPage() {
                 required
               />
 
-              {previewChannels[0] && (
-                <div className="max-w-xl rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-red-700 text-white flex items-center justify-center font-black">{initials(previewChannels[0])}</div>
-                  <div>
-                    <p className="font-black text-slate-900">{previewChannels[0].split(/\s+/).slice(0, 3).join(" ")}</p>
-                    <p className="text-slate-500 text-sm">{previewChannels[0].match(/UC[a-zA-Z0-9_-]+/)?.[0] || previewChannels[0]}</p>
+              {previewChannels.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-black text-slate-700">Channel preview</p>
+                    {bulkPreviewLoading && (
+                      <span className="inline-flex items-center gap-2 text-xs font-bold text-blue-600">
+                        <Loader2 size={14} className="animate-spin" /> Loading YouTube data
+                      </span>
+                    )}
                   </div>
-                  <button type="button" onClick={() => setBulkText(previewChannels.slice(1).join("\n"))} className="ml-auto text-slate-400 hover:text-red-500"><Trash2 size={18} /></button>
+                  <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                    {(bulkPreview.length ? bulkPreview : previewChannels.map((input) => ({
+                      input,
+                      channel_id: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+                      title: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+                      thumbnail: "",
+                      subscriber_count: 0,
+                      view_count: 0,
+                      video_count: 0,
+                      status: "pending"
+                    }))).map((channel, index) => (
+                      <div
+                        key={`${channel.input}-${index}`}
+                        className={`rounded-2xl border bg-white p-3 flex items-center gap-3 ${channel.status === "error" ? "border-red-200" : channel.status === "pending" ? "border-amber-200" : "border-slate-200"}`}
+                      >
+                        {channel.thumbnail ? (
+                          <img src={channel.thumbnail} alt={channel.title || channel.channel_id} className="w-11 h-11 rounded-xl object-cover border border-slate-200" />
+                        ) : (
+                          <div className={`w-11 h-11 rounded-xl text-white flex items-center justify-center font-black ${channel.status === "error" ? "bg-red-600" : channel.status === "pending" ? "bg-amber-500" : "bg-blue-600"}`}>
+                            {initials(channel.title || channel.channel_id)}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="font-black text-slate-900 truncate">{channel.title || channel.channel_id}</p>
+                          <p className="text-xs text-slate-500 font-mono truncate">{channel.channel_id}</p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                            <span>Subs <b className="text-slate-900">{formatCompact(channel.subscriber_count)}</b></span>
+                            <span>Views <b className="text-slate-900">{formatCompact(channel.view_count)}</b></span>
+                            <span>Videos <b className="text-slate-900">{formatCompact(channel.video_count)}</b></span>
+                          </div>
+                          {(channel.status === "error" || channel.status === "pending") && (
+                            <p
+                              className={`mt-1 text-[11px] font-bold break-words ${channel.status === "pending" ? "text-amber-600" : "text-red-500"}`}
+                              title={channel.status_error || "Could not get YouTube data"}
+                            >
+                              {channel.status_error || "Could not get YouTube data"}
+                            </p>
+                          )}
+                        </div>
+                        <button type="button" onClick={() => removeBulkPreviewAt(index)} className="shrink-0 text-slate-400 hover:text-red-500"><Trash2 size={17} /></button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
