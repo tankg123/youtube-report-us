@@ -12,6 +12,7 @@ const channelRoutes = require("./routes/channelRoutes");
 const authRoutes = require("./routes/authRoutes");
 const videoRoutes = require("./routes/videoRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const settingsRoutes = require("./routes/settingsRoutes");
 const { syncVideosNow } = require("./controllers/videoController");
 const apiKeyMiddleware = require("./middlewares/apiKeyMiddleware");
 
@@ -59,6 +60,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/channels", channelRoutes);
 app.use("/api/videos", videoRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/settings", settingsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

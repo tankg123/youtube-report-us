@@ -16,6 +16,14 @@ function createToken(user) {
   );
 }
 
+function isStrongPassword(password = "") {
+  return /[a-z]/.test(password)
+    && /[A-Z]/.test(password)
+    && /\d/.test(password)
+    && /[^A-Za-z0-9]/.test(password)
+    && String(password).length >= 8;
+}
+
 exports.register = (req, res) => {
   try {
     const { full_name, email, password } = req.body;
@@ -157,6 +165,90 @@ exports.me = (req, res) => {
     success: true,
     user: req.user
   });
+};
+
+exports.updateProfile = (req, res) => {
+  try {
+    const data = req.body || {};
+    const fullName = String(data.full_name || "").trim();
+    const email = String(data.email || "").trim().toLowerCase();
+
+    if (!fullName || !email) {
+      return res.status(400).json({ success: false, message: "Full name and email are required" });
+    }
+
+    const current = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+    if (!current) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const duplicated = db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").get(email, req.user.id);
+    if (duplicated) {
+      return res.status(409).json({ success: false, message: "Email is already used by another account" });
+    }
+
+    db.prepare(`
+      UPDATE users
+      SET full_name = ?, email = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(fullName, email, req.user.id);
+
+    const user = db.prepare(`
+      SELECT id, full_name, email, role, status, created_at, updated_at
+      FROM users
+      WHERE id = ?
+    `).get(req.user.id);
+
+    const token = createToken(user);
+
+    res.json({
+      success: true,
+      message: "Profile updated",
+      token,
+      user
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not update profile", error: error.message });
+  }
+};
+
+exports.changePassword = (req, res) => {
+  try {
+    const currentPassword = String(req.body?.current_password || "");
+    const newPassword = String(req.body?.new_password || "");
+    const confirmPassword = String(req.body?.confirm_password || "");
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ success: false, message: "Current password, new password, and confirmation are required" });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ success: false, message: "New password confirmation does not match" });
+    }
+
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character"
+      });
+    }
+
+    const current = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+    if (!current) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (!bcrypt.compareSync(currentPassword, current.password)) {
+      return res.status(400).json({ success: false, message: "Current password is not correct" });
+    }
+
+    db.prepare("UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(bcrypt.hashSync(newPassword, 10), req.user.id);
+
+    res.json({ success: true, message: "Password changed" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not change password", error: error.message });
+  }
 };
 
 exports.getAllUsers = (req, res) => {

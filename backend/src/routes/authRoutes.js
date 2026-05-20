@@ -11,6 +11,8 @@ router.post("/register", authController.register);
 router.post("/login", authController.login);
 
 router.get("/me", authMiddleware, authController.me);
+router.put("/profile", authMiddleware, authController.updateProfile);
+router.put("/change-password", authMiddleware, authController.changePassword);
 
 router.get(
   "/users",

@@ -36,6 +36,14 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 const channelColumns = db.prepare("PRAGMA table_info(channels)").all();
 const hasLatestVideos = channelColumns.some((column) => column.name === "latest_videos");
 const hasChannelStatus = channelColumns.some((column) => column.name === "status");

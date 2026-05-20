@@ -1015,6 +1015,139 @@ exports.getYoutubeQuota = (req, res) => {
   }
 };
 
+function dashboardGroupTotals(month = "") {
+  const groups = db.prepare("SELECT id FROM channel_groups ORDER BY id ASC").all();
+  const months = month
+    ? [month]
+    : db.prepare("SELECT DISTINCT month FROM channel_revenues ORDER BY month ASC").all().map((row) => row.month);
+
+  const partnerMap = new Map();
+  let revenueUsd = 0;
+  let paidUsd = 0;
+  let feeUsd = 0;
+
+  for (const itemMonth of months) {
+    for (const group of groups) {
+      const detail = groupDetail(group.id, itemMonth);
+      if (!detail) continue;
+
+      const groupRevenue = Number(detail.summary?.total_revenue_usd || 0);
+      const groupPaid = Number(detail.summary?.payable_usd || detail.summary?.paid_usd || 0);
+      const groupFee = Number(detail.summary?.fee_usd || 0);
+
+      revenueUsd += groupRevenue;
+      paidUsd += groupPaid;
+      feeUsd += groupFee;
+
+      const partnerId = detail.partner_id;
+      if (!partnerMap.has(partnerId)) {
+        partnerMap.set(partnerId, {
+          partner_id: partnerId,
+          partner_name: detail.display_name || detail.partner_name || "-",
+          revenue_usd: 0,
+          paid_usd: 0,
+          profit_usd: 0,
+          channels: new Set()
+        });
+      }
+
+      const partner = partnerMap.get(partnerId);
+      partner.revenue_usd += groupRevenue;
+      partner.paid_usd += groupPaid;
+      partner.profit_usd += groupRevenue - groupPaid;
+      for (const channel of detail.channels || []) {
+        if (channel.channel_id) partner.channels.add(channel.channel_id);
+      }
+    }
+  }
+
+  const topPartners = [...partnerMap.values()]
+    .map((partner) => ({
+      ...partner,
+      channels: partner.channels.size
+    }))
+    .sort((a, b) => b.revenue_usd - a.revenue_usd)
+    .slice(0, 10);
+
+  return {
+    total_revenue_usd: revenueUsd,
+    total_paid_usd: paidUsd,
+    total_fee_usd: feeUsd,
+    total_profit_usd: revenueUsd - paidUsd,
+    top_partners: topPartners
+  };
+}
+
+exports.getDashboard = (req, res) => {
+  try {
+    const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+
+    const allRevenue = db.prepare("SELECT COALESCE(SUM(revenue), 0) AS total FROM channel_revenues").get();
+    const monthRevenue = db.prepare("SELECT COALESCE(SUM(revenue), 0) AS total FROM channel_revenues WHERE month = ?").get(month);
+    const fullGroupTotals = dashboardGroupTotals("");
+    const monthGroupTotals = dashboardGroupTotals(month);
+
+    const channelStats = db.prepare(`
+      SELECT
+        COUNT(*) AS total_channels,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS live_channels,
+        SUM(CASE WHEN status != 'active' OR status_error IS NOT NULL THEN 1 ELSE 0 END) AS error_channels
+      FROM channels
+    `).get();
+
+    const totalPartners = db.prepare("SELECT COUNT(*) AS total FROM partners").get();
+
+    const topChannels = db.prepare(`
+      SELECT
+        cr.channel_id,
+        COALESCE(c.title, cr.channel_id) AS title,
+        COALESCE(c.thumbnail, '') AS thumbnail,
+        COALESCE(c.status, 'error') AS status,
+        COALESCE(SUM(cr.revenue), 0) AS revenue_usd,
+        COUNT(DISTINCT cr.month) AS months
+      FROM channel_revenues cr
+      LEFT JOIN channels c ON c.channel_id = cr.channel_id
+      WHERE (? = '' OR cr.month = ?)
+      GROUP BY cr.channel_id
+      ORDER BY revenue_usd DESC
+      LIMIT 10
+    `).all(month, month);
+
+    res.json({
+      success: true,
+      data: {
+        month,
+        full: {
+          total_revenue_usd: Number(allRevenue?.total || 0),
+          total_paid_usd: fullGroupTotals.total_paid_usd,
+          total_profit_usd: Number(allRevenue?.total || 0) - fullGroupTotals.total_paid_usd,
+          total_fee_usd: fullGroupTotals.total_fee_usd
+        },
+        month_summary: {
+          total_revenue_usd: Number(monthRevenue?.total || 0),
+          total_paid_usd: monthGroupTotals.total_paid_usd,
+          total_profit_usd: Number(monthRevenue?.total || 0) - monthGroupTotals.total_paid_usd,
+          total_fee_usd: monthGroupTotals.total_fee_usd
+        },
+        counts: {
+          total_partners: Number(totalPartners?.total || 0),
+          total_channels: Number(channelStats?.total_channels || 0),
+          live_channels: Number(channelStats?.live_channels || 0),
+          error_channels: Number(channelStats?.error_channels || 0)
+        },
+        top_partners: monthGroupTotals.top_partners,
+        top_channels: topChannels.map((channel) => ({
+          ...channel,
+          revenue_usd: Number(channel.revenue_usd || 0),
+          months: Number(channel.months || 0)
+        }))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not load report dashboard", error: error.message });
+  }
+};
+
 exports.getNetworks = (req, res) => {
   try {
     const rows = db.prepare("SELECT * FROM networks ORDER BY updated_at DESC, id DESC").all();

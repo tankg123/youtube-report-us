@@ -26,6 +26,13 @@ router.post(
 );
 
 router.post(
+  "/management/export",
+  authMiddleware,
+  allowRoles(...CHANNEL_MANAGEMENT_ROLES),
+  channelController.exportManagedChannels
+);
+
+router.post(
   "/management/bulk",
   authMiddleware,
   allowRoles(...CHANNEL_MANAGEMENT_ROLES),

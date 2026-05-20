@@ -1,4 +1,5 @@
 const db = require("../config/database");
+const ExcelJS = require("exceljs");
 const { getChannelFromYoutube, getChannelsFromYoutube } = require("../services/youtubeService");
 
 function parseChannel(row) {
@@ -296,7 +297,7 @@ function saveManagedChannelData(data, meta = {}) {
     meta.partner_id || null,
     meta.collaborator_id || null,
     meta.sharing_id || null,
-    meta.colab_sharing_id || meta.sharing_id || null,
+    meta.colab_sharing_id || null,
     meta.note || "",
     data.status || "active",
     data.status_error || null
@@ -335,8 +336,56 @@ function updateManagedChannelYoutubeData(data) {
   );
 }
 
-function managedChannelRows(keyword = "") {
-  const search = `%${String(keyword || "").trim()}%`;
+function managedChannelSearchTerms(keyword = "") {
+  return String(keyword || "")
+    .split(/[\n,;]+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+function managedChannelRows(keyword = "", filters = {}) {
+  const terms = managedChannelSearchTerms(keyword);
+  const where = [];
+  const params = [];
+
+  if (terms.length) {
+    where.push(`(${terms.map(() => "(mc.title LIKE ? OR mc.channel_id LIKE ? OR mc.custom_url LIKE ?)").join(" OR ")})`);
+    for (const term of terms) {
+      const search = `%${term}%`;
+      params.push(search, search, search);
+    }
+  }
+
+  if (filters.network_id) {
+    where.push("mc.network_id = ?");
+    params.push(filters.network_id);
+  }
+
+  if (filters.partner_id) {
+    where.push("mc.partner_id = ?");
+    params.push(filters.partner_id);
+  }
+
+  if (filters.sharing_id) {
+    where.push("mc.revenue_sharing_id = ?");
+    params.push(filters.sharing_id);
+  }
+
+  if (filters.created_from) {
+    where.push("date(mc.created_at) >= date(?)");
+    params.push(filters.created_from);
+  }
+
+  if (filters.created_to) {
+    where.push("date(mc.created_at) <= date(?)");
+    params.push(filters.created_to);
+  }
+
+  if (Array.isArray(filters.ids) && filters.ids.length) {
+    where.push(`mc.id IN (${filters.ids.map(() => "?").join(",")})`);
+    params.push(...filters.ids);
+  }
+
   return db.prepare(`
     SELECT mc.*,
            n.name AS network_name,
@@ -350,12 +399,9 @@ function managedChannelRows(keyword = "") {
     LEFT JOIN collaborators c ON c.id = mc.collaborator_id
     LEFT JOIN revenue_sharings rs ON rs.id = mc.revenue_sharing_id
     LEFT JOIN revenue_sharings crs ON crs.id = mc.colab_revenue_sharing_id
-    WHERE ? = '%%'
-       OR mc.title LIKE ?
-       OR mc.channel_id LIKE ?
-       OR mc.custom_url LIKE ?
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY mc.updated_at DESC, mc.id DESC
-  `).all(search, search, search, search);
+  `).all(...params);
 }
 
 function sharingRateTotal(partnerSharingId, collaboratorSharingId) {
@@ -414,10 +460,81 @@ function parseManagedChannelInputs(raw) {
 
 exports.getManagedChannels = (req, res) => {
   try {
-    const rows = managedChannelRows(req.query.keyword);
+    const rows = managedChannelRows(req.query.keyword, req.query || {});
     res.json({ success: true, total: rows.length, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not load managed channels", error: error.message });
+  }
+};
+
+exports.exportManagedChannels = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const ids = Array.isArray(body.ids) ? body.ids.map((id) => Number(id)).filter(Boolean) : [];
+    const rows = managedChannelRows(body.keyword || "", {
+      ...(body.filters || {}),
+      ids
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "ANS Network";
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet("Channel Management");
+
+    sheet.columns = [
+      { header: "No.", key: "no", width: 8 },
+      { header: "Channel Name", key: "title", width: 34 },
+      { header: "Channel ID", key: "channel_id", width: 34 },
+      { header: "Date Added", key: "created_at", width: 20 },
+      { header: "Network", key: "network", width: 24 },
+      { header: "Partner", key: "partner", width: 28 },
+      { header: "Rate Share", key: "rate", width: 16 },
+      { header: "Subs", key: "subs", width: 15 },
+      { header: "Views", key: "views", width: 16 },
+      { header: "Videos", key: "videos", width: 12 }
+    ];
+
+    sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
+    sheet.getRow(1).alignment = { vertical: "middle", horizontal: "center" };
+
+    rows.forEach((row, index) => {
+      sheet.addRow({
+        no: index + 1,
+        title: row.title || row.channel_id,
+        channel_id: row.channel_id,
+        created_at: row.created_at || "",
+        network: row.network_name || "",
+        partner: row.partner_display_name || row.partner_name || "",
+        rate: row.revenue_share_rate == null ? "" : `${Number(row.revenue_share_rate || 0)}%`,
+        subs: Number(row.subscriber_count || 0),
+        views: Number(row.view_count || 0),
+        videos: Number(row.video_count || 0)
+      });
+    });
+
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFD9E2EC" } },
+          left: { style: "thin", color: { argb: "FFD9E2EC" } },
+          bottom: { style: "thin", color: { argb: "FFD9E2EC" } },
+          right: { style: "thin", color: { argb: "FFD9E2EC" } }
+        };
+        if (rowNumber > 1) cell.alignment = { vertical: "middle" };
+      });
+    });
+
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    sheet.autoFilter = "A1:J1";
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const suffix = ids.length ? "selected" : "all";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="channel-management-${suffix}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not export managed channels", error: error.message });
   }
 };
 
