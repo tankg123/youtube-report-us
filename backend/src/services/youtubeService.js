@@ -8,7 +8,9 @@ const quotaState = {
   date: new Date().toISOString().slice(0, 10),
   estimatedUsed: 0,
   lastError: null,
-  calls: []
+  calls: [],
+  keyIndex: 0,
+  exhaustedKeys: {}
 };
 
 const quotaCosts = {
@@ -25,49 +27,140 @@ function resetQuotaIfNeeded() {
     quotaState.estimatedUsed = 0;
     quotaState.lastError = null;
     quotaState.calls = [];
+    quotaState.keyIndex = 0;
+    quotaState.exhaustedKeys = {};
   }
 }
 
-function apiKeyPreview() {
-  const key = process.env.YOUTUBE_API_KEY || "";
+function getYoutubeApiKeys() {
+  const keys = [
+    ...(process.env.YOUTUBE_API_KEYS || "").split(/[\n,;]+/),
+    process.env.YOUTUBE_API_KEY || ""
+  ]
+    .map((key) => String(key || "").trim())
+    .filter(Boolean);
+
+  return [...new Set(keys)];
+}
+
+function previewApiKey(key = "") {
   if (!key) return "";
   return `${key.slice(0, 7)}...${key.slice(-4)}`;
 }
 
-function parseYoutubeError(error) {
+function apiKeyPreview() {
+  return previewApiKey(getActiveYoutubeApiKey());
+}
+
+function getActiveYoutubeApiKey() {
+  resetQuotaIfNeeded();
+  const keys = getYoutubeApiKeys();
+  if (!keys.length) return "";
+
+  const start = quotaState.keyIndex % keys.length;
+  for (let offset = 0; offset < keys.length; offset += 1) {
+    const index = (start + offset) % keys.length;
+    const key = keys[index];
+    if (!quotaState.exhaustedKeys[key]) {
+      quotaState.keyIndex = index;
+      return key;
+    }
+  }
+
+  return keys[start];
+}
+
+function markApiKeyExhausted(key, reason = "quotaExceeded") {
+  if (!key) return;
+  quotaState.exhaustedKeys[key] = {
+    reason,
+    time: new Date().toISOString()
+  };
+
+  const keys = getYoutubeApiKeys();
+  const currentIndex = keys.indexOf(key);
+  if (currentIndex >= 0 && keys.length > 1) {
+    quotaState.keyIndex = (currentIndex + 1) % keys.length;
+  }
+}
+
+function cleanYoutubeMessage(message = "") {
+  return String(message || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseYoutubeError(error, key = "") {
   const payload = error.response?.data?.error;
   const detail = payload?.errors?.[0] || {};
+  const reason = detail.reason || "";
+  const rawMessage = cleanYoutubeMessage(payload?.message || error.message);
+  const message = reason === "quotaExceeded"
+    ? "YouTube API quota exceeded for this key. Use another API key or wait for Google quota reset."
+    : rawMessage;
+
   return {
     status: error.response?.status || null,
     code: payload?.code || error.response?.status || null,
-    reason: detail.reason || "",
+    reason,
     domain: detail.domain || "",
-    message: payload?.message || error.message,
-    key: apiKeyPreview(),
+    message,
+    key: previewApiKey(key || getActiveYoutubeApiKey()),
     time: new Date().toISOString()
   };
 }
 
 async function youtubeGet(url, options, endpoint, units = quotaCosts[endpoint] || 1) {
   resetQuotaIfNeeded();
-  quotaState.estimatedUsed += units;
-  quotaState.calls.unshift({
-    endpoint,
-    units,
-    time: new Date().toISOString()
-  });
-  quotaState.calls = quotaState.calls.slice(0, 30);
+  const keys = getYoutubeApiKeys();
 
-  try {
-    return await axios.get(url, options);
-  } catch (error) {
-    const parsed = parseYoutubeError(error);
-    quotaState.lastError = parsed;
-    const suffix = parsed.reason ? ` (${parsed.reason})` : "";
-    const enhanced = new Error(`${parsed.message || error.message}${suffix}`);
-    enhanced.youtube = parsed;
-    throw enhanced;
+  if (!keys.length) {
+    throw new Error("Missing YOUTUBE_API_KEY or YOUTUBE_API_KEYS in .env");
   }
+
+  const attempts = Math.max(1, keys.length);
+  let lastEnhancedError = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const key = getActiveYoutubeApiKey();
+    const requestOptions = {
+      ...options,
+      params: {
+        ...(options?.params || {}),
+        key
+      }
+    };
+
+    quotaState.estimatedUsed += units;
+    quotaState.calls.unshift({
+      endpoint,
+      units,
+      key: previewApiKey(key),
+      time: new Date().toISOString()
+    });
+    quotaState.calls = quotaState.calls.slice(0, 30);
+
+    try {
+      return await axios.get(url, requestOptions);
+    } catch (error) {
+      const parsed = parseYoutubeError(error, key);
+      quotaState.lastError = parsed;
+      const suffix = parsed.reason ? ` (${parsed.reason})` : "";
+      const enhanced = new Error(`${parsed.message || error.message}${suffix}`);
+      enhanced.youtube = parsed;
+      lastEnhancedError = enhanced;
+
+      if (parsed.reason === "quotaExceeded" && keys.length > 1) {
+        markApiKeyExhausted(key, parsed.reason);
+        continue;
+      }
+
+      throw enhanced;
+    }
+  }
+
+  throw lastEnhancedError || new Error("YouTube API request failed");
 }
 
 function getQuotaStatus() {
@@ -79,6 +172,13 @@ function getQuotaStatus() {
     estimated_used: quotaState.estimatedUsed,
     estimated_remaining: Math.max(0, dailyLimit - quotaState.estimatedUsed),
     api_key: apiKeyPreview(),
+    api_keys: getYoutubeApiKeys().map((key, index) => ({
+      index: index + 1,
+      key: previewApiKey(key),
+      active: key === getActiveYoutubeApiKey(),
+      exhausted: Boolean(quotaState.exhaustedKeys[key]),
+      exhausted_reason: quotaState.exhaustedKeys[key]?.reason || ""
+    })),
     last_error: quotaState.lastError,
     recent_calls: quotaState.calls,
     costs: quotaCosts,
@@ -110,10 +210,10 @@ function extractChannelInput(input) {
 
 async function getChannelFromYoutube(input, options = {}) {
   const includeLatest = options.includeLatest !== false;
-  const apiKey = process.env.YOUTUBE_API_KEY;
+  const apiKey = getActiveYoutubeApiKey();
 
   if (!apiKey) {
-    throw new Error("Missing YOUTUBE_API_KEY in .env");
+    throw new Error("Missing YOUTUBE_API_KEY or YOUTUBE_API_KEYS in .env");
   }
 
   const value = extractChannelInput(input);
@@ -169,10 +269,10 @@ async function getChannelFromYoutube(input, options = {}) {
 
 async function getChannelsFromYoutube(inputs, options = {}) {
   const includeLatest = options.includeLatest === true;
-  const apiKey = process.env.YOUTUBE_API_KEY;
+  const apiKey = getActiveYoutubeApiKey();
 
   if (!apiKey) {
-    throw new Error("Missing YOUTUBE_API_KEY in .env");
+    throw new Error("Missing YOUTUBE_API_KEY or YOUTUBE_API_KEYS in .env");
   }
 
   const ids = [...new Set((inputs || []).map(extractChannelInput).filter(Boolean))]
@@ -290,10 +390,10 @@ async function getLatestVideosFromUploads(uploadsPlaylistId, apiKey) {
 }
 
 async function getAllVideosFromYoutube(channelId) {
-  const apiKey = process.env.YOUTUBE_API_KEY;
+  const apiKey = getActiveYoutubeApiKey();
 
   if (!apiKey) {
-    throw new Error("Missing YOUTUBE_API_KEY in .env");
+    throw new Error("Missing YOUTUBE_API_KEY or YOUTUBE_API_KEYS in .env");
   }
 
   const channelResponse = await youtubeGet(YOUTUBE_API, {

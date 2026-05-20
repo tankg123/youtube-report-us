@@ -1,5 +1,5 @@
 const db = require("../config/database");
-const { getChannelFromYoutube } = require("../services/youtubeService");
+const { getChannelFromYoutube, getChannelsFromYoutube } = require("../services/youtubeService");
 
 function parseChannel(row) {
   if (!row) return row;
@@ -303,6 +303,38 @@ function saveManagedChannelData(data, meta = {}) {
   );
 }
 
+function updateManagedChannelYoutubeData(data) {
+  db.prepare(`
+    UPDATE managed_channels
+    SET title = ?,
+        description = ?,
+        custom_url = ?,
+        thumbnail = ?,
+        view_count = ?,
+        subscriber_count = ?,
+        video_count = ?,
+        country = ?,
+        published_at = ?,
+        status = ?,
+        status_error = ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE channel_id = ?
+  `).run(
+    data.title || data.channel_id,
+    data.description || "",
+    data.custom_url || "",
+    data.thumbnail || "",
+    Number(data.view_count || 0),
+    Number(data.subscriber_count || 0),
+    Number(data.video_count || 0),
+    data.country || "",
+    data.published_at || "",
+    data.status || "active",
+    data.status_error || null,
+    data.channel_id
+  );
+}
+
 function managedChannelRows(keyword = "") {
   const search = `%${String(keyword || "").trim()}%`;
   return db.prepare(`
@@ -348,12 +380,110 @@ function validateSharingLimit(partnerSharingId, collaboratorSharingId) {
   return null;
 }
 
+function isQuotaError(error) {
+  return error?.youtube?.reason === "quotaExceeded" || /quotaExceeded|quota exceeded|quota reset/i.test(String(error?.message || ""));
+}
+
+function normalizeManagedChannelInput(input) {
+  const value = String(input || "").trim();
+  if (!value) return "";
+
+  const channelId = value.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0];
+  if (channelId) return channelId;
+
+  const channelUrl = value.match(/youtube\.com\/channel\/([^/?&#\s]+)/i)?.[1];
+  if (channelUrl) return channelUrl;
+
+  const handle = value.match(/(?:youtube\.com\/)?@([a-zA-Z0-9._-]+)/)?.[1];
+  if (handle) return `@${handle}`;
+
+  return value;
+}
+
+function parseManagedChannelInputs(raw) {
+  return String(raw || "")
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((original) => ({
+      original,
+      value: normalizeManagedChannelInput(original)
+    }))
+    .filter((item) => item.value);
+}
+
 exports.getManagedChannels = (req, res) => {
   try {
     const rows = managedChannelRows(req.query.keyword);
     res.json({ success: true, total: rows.length, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not load managed channels", error: error.message });
+  }
+};
+
+exports.previewChannelsBulk = async (req, res) => {
+  try {
+    const inputs = parseManagedChannelInputs(req.body?.channel_inputs);
+
+    if (!inputs.length) {
+      return res.json({ success: true, total: 0, data: [] });
+    }
+
+    const directIds = [...new Set(inputs.map((item) => item.value).filter((value) => value.startsWith("UC")))];
+    const youtubeById = new Map();
+    const errorsByInput = new Map();
+
+    if (directIds.length) {
+      try {
+        const rows = await getChannelsFromYoutube(directIds, { includeLatest: false });
+        for (const row of rows) {
+          youtubeById.set(row.channel_id, row);
+        }
+      } catch (error) {
+        for (const id of directIds) {
+          errorsByInput.set(id, error.message);
+        }
+      }
+    }
+
+    for (const item of inputs.filter((entry) => entry.value.startsWith("@"))) {
+      try {
+        const data = await getChannelFromYoutube(item.value, { includeLatest: false });
+        youtubeById.set(item.value, data);
+        youtubeById.set(data.channel_id, data);
+      } catch (error) {
+        errorsByInput.set(item.value, error.message);
+      }
+    }
+
+    const managedCache = db.prepare("SELECT * FROM managed_channels WHERE channel_id = ?");
+    const reportCache = db.prepare("SELECT * FROM channels WHERE channel_id = ?");
+
+    const data = inputs.map((item) => {
+      const youtubeData = youtubeById.get(item.value);
+      const channelId = youtubeData?.channel_id || (item.value.startsWith("UC") ? item.value : item.original);
+      const cached = channelId.startsWith("UC")
+        ? (managedCache.get(channelId) || reportCache.get(channelId))
+        : null;
+      const source = youtubeData || cached || {};
+      const statusError = errorsByInput.get(item.value) || source.status_error || "";
+
+      return {
+        input: item.original,
+        channel_id: source.channel_id || channelId,
+        title: source.title || (/quota/i.test(statusError) ? "Waiting for YouTube data" : (statusError ? "Channel error / die" : channelId)),
+        thumbnail: source.thumbnail || "",
+        subscriber_count: Number(source.subscriber_count || 0),
+        view_count: Number(source.view_count || 0),
+        video_count: Number(source.video_count || 0),
+        status: youtubeData || cached ? (source.status || "active") : (/quota/i.test(statusError) ? "pending" : "error"),
+        status_error: statusError
+      };
+    });
+
+    res.json({ success: true, total: data.length, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not preview channels", error: error.message });
   }
 };
 
@@ -500,6 +630,65 @@ exports.bulkDeleteManagedChannels = (req, res) => {
   }
 };
 
+exports.syncManagedChannelsBasic = async (req, res) => {
+  try {
+    const rows = db.prepare("SELECT * FROM managed_channels ORDER BY id ASC").all();
+    const channelIds = rows.map((row) => row.channel_id).filter(Boolean);
+
+    if (!channelIds.length) {
+      return res.json({
+        success: true,
+        message: "No managed channels to sync",
+        total: 0,
+        synced: 0,
+        errors: []
+      });
+    }
+
+    const youtubeRows = await getChannelsFromYoutube(channelIds, { includeLatest: false });
+    const youtubeById = new Map(youtubeRows.map((row) => [row.channel_id, row]));
+    const errors = [];
+    let synced = 0;
+
+    const markError = db.prepare(`
+      UPDATE managed_channels
+      SET status = ?, status_error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+
+    const transaction = db.transaction(() => {
+      for (const row of rows) {
+        const data = youtubeById.get(row.channel_id);
+        if (!data) {
+          const message = "Channel not found on YouTube";
+          markError.run("error", message, row.id);
+          errors.push({ id: row.id, channel_id: row.channel_id, error: message });
+          continue;
+        }
+
+        updateManagedChannelYoutubeData(data);
+        synced += 1;
+      }
+    });
+
+    transaction();
+
+    res.json({
+      success: true,
+      message: `Synced ${synced} managed channels`,
+      total: rows.length,
+      synced,
+      errors
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Could not sync managed channels",
+      error: error.message
+    });
+  }
+};
+
 exports.addChannelsBulk = async (req, res) => {
   try {
     const { channel_inputs, network_id, partner_id, collaborator_id, sharing_id, colab_sharing_id, note } = req.body;
@@ -508,10 +697,7 @@ exports.addChannelsBulk = async (req, res) => {
       return res.status(400).json({ success: false, message: sharingError });
     }
 
-    const inputs = String(channel_inputs || "")
-      .split(/[\n,;]+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const inputs = parseManagedChannelInputs(channel_inputs);
 
     if (!inputs.length) {
       return res.status(400).json({ success: false, message: "Please enter at least one channel" });
@@ -519,24 +705,57 @@ exports.addChannelsBulk = async (req, res) => {
 
     const created = [];
     const errors = [];
+    const fetchedByInput = new Map();
+    const fetchErrors = new Map();
+
+    const directIds = [...new Set(inputs.map((item) => item.value).filter((value) => value.startsWith("UC")))];
+    if (directIds.length) {
+      try {
+        const rows = await getChannelsFromYoutube(directIds, { includeLatest: false });
+        for (const row of rows) {
+          fetchedByInput.set(row.channel_id, row);
+        }
+      } catch (error) {
+        for (const id of directIds) {
+          fetchErrors.set(id, error.message);
+        }
+      }
+    }
+
+    for (const input of inputs.filter((item) => item.value.startsWith("@"))) {
+      try {
+        const data = await getChannelFromYoutube(input.value, { includeLatest: false });
+        fetchedByInput.set(input.value, data);
+        fetchedByInput.set(data.channel_id, data);
+      } catch (error) {
+        fetchErrors.set(input.value, error.message);
+      }
+    }
 
     for (const input of inputs) {
       try {
-        const data = await getChannelFromYoutube(input);
+        const data = fetchedByInput.get(input.value);
+        if (!data) {
+          throw new Error(fetchErrors.get(input.value) || "Channel not found on YouTube");
+        }
+
         saveManagedChannelData(data, { network_id, partner_id, collaborator_id, sharing_id, colab_sharing_id, note });
         const saved = managedChannelRows(data.channel_id).find((row) => row.channel_id === data.channel_id);
         created.push(saved);
       } catch (error) {
-        const fallbackId = String(input || "").match(/UC[a-zA-Z0-9_-]+/)?.[0] || String(input || "").replace(/[^a-zA-Z0-9_-]/g, "");
+        const fallbackId = input.value.startsWith("UC")
+          ? input.value
+          : String(input.original || "").replace(/[^a-zA-Z0-9_-]/g, "");
         if (fallbackId) {
+          const quotaError = isQuotaError(error);
           saveManagedChannelData({
             channel_id: fallbackId,
-            title: "Channel error / die",
-            status: "error",
+            title: quotaError ? "Waiting for YouTube data" : "Channel error / die",
+            status: quotaError ? "pending" : "error",
             status_error: error.message
           }, { network_id, partner_id, collaborator_id, sharing_id, colab_sharing_id, note });
         }
-        errors.push({ input, error: error.message });
+        errors.push({ input: input.original, error: error.message });
       }
     }
 

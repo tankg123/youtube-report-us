@@ -19,6 +19,13 @@ router.get(
 );
 
 router.post(
+  "/management/preview",
+  authMiddleware,
+  allowRoles(...CHANNEL_MANAGEMENT_ROLES),
+  channelController.previewChannelsBulk
+);
+
+router.post(
   "/management/bulk",
   authMiddleware,
   allowRoles(...CHANNEL_MANAGEMENT_ROLES),
@@ -37,6 +44,13 @@ router.post(
   authMiddleware,
   allowRoles(...CHANNEL_MANAGEMENT_ROLES),
   channelController.bulkDeleteManagedChannels
+);
+
+router.post(
+  "/management/sync-basic",
+  authMiddleware,
+  allowRoles(...CHANNEL_MANAGEMENT_ROLES),
+  channelController.syncManagedChannelsBasic
 );
 
 router.put(
