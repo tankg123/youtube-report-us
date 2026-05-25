@@ -339,6 +339,112 @@ db.exec(`
     FOREIGN KEY (artist_id) REFERENCES content_id_artists(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS expense_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_name TEXT NOT NULL,
+    account_type TEXT NOT NULL DEFAULT 'bank',
+    owner_type TEXT NOT NULL DEFAULT 'company',
+    currency TEXT NOT NULL DEFAULT 'VND',
+    bank_name TEXT,
+    account_number TEXT,
+    opening_balance REAL NOT NULL DEFAULT 0,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS expense_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS expense_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    category_id INTEGER,
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'VND',
+    transaction_date TEXT NOT NULL,
+    title TEXT NOT NULL,
+    vendor TEXT,
+    note TEXT,
+    attachment_name TEXT,
+    attachment_data_url TEXT,
+    debt_status TEXT NOT NULL DEFAULT 'none',
+    reimbursement_account_id INTEGER,
+    reimbursed_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by INTEGER,
+    updated_by INTEGER,
+    deleted_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
+    FOREIGN KEY (account_id) REFERENCES expense_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES expense_categories(id) ON DELETE SET NULL,
+    FOREIGN KEY (reimbursement_account_id) REFERENCES expense_accounts(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS expense_transaction_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor_id INTEGER,
+    actor_name TEXT,
+    note TEXT,
+    snapshot TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES expense_transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS expense_revenues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'VND',
+    revenue_date TEXT NOT NULL,
+    revenue_type TEXT NOT NULL,
+    description TEXT,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by INTEGER,
+    updated_by INTEGER,
+    deleted_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
+    FOREIGN KEY (account_id) REFERENCES expense_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS expense_revenue_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    revenue_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor_id INTEGER,
+    actor_name TEXT,
+    note TEXT,
+    snapshot TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (revenue_id) REFERENCES expense_revenues(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+
   CREATE TABLE IF NOT EXISTS content_id_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     type TEXT NOT NULL,
@@ -363,6 +469,8 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_content_id_products_created ON content_i
 db.exec("CREATE INDEX IF NOT EXISTS idx_content_id_tracks_product ON content_id_tracks(product_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_content_id_track_artists_track ON content_id_track_artists(track_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_content_id_track_artists_artist ON content_id_track_artists(artist_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_expense_transactions_account_date ON expense_transactions(account_id, transaction_date)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_expense_revenues_account_date ON expense_revenues(account_id, revenue_date)");
 
 const contentProductColumns = db.prepare("PRAGMA table_info(content_id_products)").all();
 if (!contentProductColumns.some((column) => column.name === "label_id")) {

@@ -14,6 +14,7 @@ const videoRoutes = require("./routes/videoRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const contentIdRoutes = require("./routes/contentIdRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
 const { syncVideosNow } = require("./controllers/videoController");
 const apiKeyMiddleware = require("./middlewares/apiKeyMiddleware");
 
@@ -36,7 +37,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
@@ -63,6 +64,7 @@ app.use("/api/videos", videoRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/content-id", contentIdRoutes);
+app.use("/api/expenses", expenseRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
