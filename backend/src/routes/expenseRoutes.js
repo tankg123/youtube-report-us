@@ -3,7 +3,7 @@ const expenseController = require("../controllers/expenseController");
 const { authMiddleware, allowRoles } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
-const EXPENSE_ROLES = ["admin", "Report Manager"];
+const EXPENSE_ROLES = ["admin", "Expense"];
 
 router.use(authMiddleware);
 router.use(allowRoles(...EXPENSE_ROLES));

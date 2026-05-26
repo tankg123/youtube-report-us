@@ -6,6 +6,7 @@ const PDFDocument = require("pdfkit");
 const db = require("../config/database");
 const { getChannelFromYoutube, getChannelsFromYoutube, getQuotaStatus } = require("../services/youtubeService");
 const { generateGroupReconciliationExcel } = require("../services/reconciliationTemplateService");
+const { normalizedRoles } = require("../middlewares/authMiddleware");
 
 function decodeXml(value = "") {
   return String(value)
@@ -501,7 +502,8 @@ function groupDetail(groupId, month) {
 }
 
 function isPartnerUser(user) {
-  return String(user?.role || "").trim().toLowerCase() === "partner";
+  const roles = normalizedRoles(user?.roles?.length ? user.roles : user?.role);
+  return roles.includes("partner") && !roles.includes("admin") && !roles.includes("report manager");
 }
 
 function partnerGroupIds(userId) {

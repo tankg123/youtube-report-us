@@ -2,13 +2,84 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const db = require("../config/database");
+const { parseRoles } = require("../middlewares/authMiddleware");
+const { sendVerificationEmail } = require("../services/mailService");
+
+const ROLE_OPTIONS = ["admin", "Report Manager", "Channel Management", "Content ID", "Expense", "Partner", "Read Only", "user"];
+const ROLE_LOOKUP = new Map(ROLE_OPTIONS.map((role) => [role.toLowerCase(), role]));
+ROLE_LOOKUP.set("readonly", "Read Only");
+ROLE_LOOKUP.set("read online", "Read Only");
+
+function normalizeRoleName(role) {
+  const clean = String(role || "").trim();
+  return ROLE_LOOKUP.get(clean.toLowerCase()) || "";
+}
+
+function normalizeRoleList(value) {
+  const input = Array.isArray(value) ? value : parseRoles(value);
+  const roles = input.map(normalizeRoleName).filter(Boolean);
+  const uniqueRoles = [...new Set(roles)];
+  if (uniqueRoles.includes("admin")) {
+    return uniqueRoles.includes("Read Only") ? ["admin", "Read Only"] : ["admin"];
+  }
+  return uniqueRoles.length ? uniqueRoles : ["user"];
+}
+
+function serializeRoles(roles) {
+  const normalized = normalizeRoleList(roles);
+  return normalized.length === 1 ? normalized[0] : JSON.stringify(normalized);
+}
+
+function userHasRole(user, role) {
+  const target = String(role || "").trim().toLowerCase();
+  return parseRoles(user?.role).some((item) => item.toLowerCase() === target);
+}
+
+function isEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function generateVerificationCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+}
+
+function hashVerificationCode(code) {
+  return crypto.createHash("sha256").update(String(code || "")).digest("hex");
+}
+
+function createVerificationCode(user) {
+  const code = generateVerificationCode();
+  const expiresMinutes = Number(process.env.EMAIL_VERIFICATION_EXPIRES_MINUTES || 15);
+  const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000).toISOString();
+
+  db.prepare("UPDATE email_verification_codes SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL")
+    .run(user.id);
+
+  db.prepare(`
+    INSERT INTO email_verification_codes (user_id, email, code_hash, expires_at)
+    VALUES (?, ?, ?, ?)
+  `).run(user.id, user.email, hashVerificationCode(code), expiresAt);
+
+  return { code, expiresAt, expiresMinutes };
+}
+
+function latestVerificationCode(userId) {
+  return db.prepare(`
+    SELECT * FROM email_verification_codes
+    WHERE user_id = ? AND used_at IS NULL
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(userId);
+}
 
 function createToken(user) {
+  const roles = normalizeRoleList(user.roles?.length ? user.roles : user.role);
   return jwt.sign(
     {
       id: user.id,
       email: user.email,
-      role: user.role
+      role: roles[0] || user.role,
+      roles
     },
     process.env.JWT_SECRET,
     {
@@ -98,84 +169,217 @@ function verifyTotp(secret, token) {
 }
 
 function getSafeUser(user) {
+  const roles = normalizeRoleList(user.roles?.length ? user.roles : user.role);
   return {
     id: user.id,
     full_name: user.full_name,
     email: user.email,
-    role: user.role,
+    role: roles[0] || "user",
+    roles,
     status: user.status,
+    first_name: user.first_name || "",
+    last_name: user.last_name || "",
+    email_verified: Number(user.email_verified ?? 1),
+    email_verified_at: user.email_verified_at || null,
     two_factor_enabled: Number(user.two_factor_enabled || 0),
     created_at: user.created_at,
     updated_at: user.updated_at
   };
 }
 
-exports.register = (req, res) => {
+exports.register = async (req, res) => {
   try {
-    const { full_name, email, password } = req.body;
+    const { first_name, last_name, email, password, confirm_password } = req.body;
+    const firstName = String(first_name || "").trim();
+    const lastName = String(last_name || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
 
-    if (!full_name || !email || !password) {
+    if (!firstName || !lastName || !cleanEmail || !password) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng nhập đầy đủ họ tên, email và mật khẩu"
+        message: "First name, last name, email, and password are required"
       });
     }
 
-    if (password.length < 6) {
+    if (!isEmail(cleanEmail)) {
       return res.status(400).json({
         success: false,
-        message: "Mật khẩu phải có ít nhất 6 ký tự"
+        message: "Please enter a valid email address"
       });
     }
 
-    const cleanEmail = String(email).trim().toLowerCase();
+    if (confirm_password !== undefined && password !== confirm_password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password confirmation does not match"
+      });
+    }
 
-    const existed = db
-      .prepare("SELECT * FROM users WHERE email = ?")
-      .get(cleanEmail);
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character"
+      });
+    }
+
+    const existed = db.prepare("SELECT * FROM users WHERE email = ?").get(cleanEmail);
 
     if (existed) {
       return res.status(409).json({
         success: false,
-        message: "Email này đã được đăng ký"
+        message: "This email is already registered"
       });
     }
 
+    const fullName = `${firstName} ${lastName}`.trim();
     const hashedPassword = bcrypt.hashSync(password, 10);
 
     const result = db.prepare(`
-      INSERT INTO users (full_name, email, password, role, status)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO users (full_name, first_name, last_name, email, password, role, status, email_verified)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      String(full_name).trim(),
+      fullName,
+      firstName,
+      lastName,
       cleanEmail,
       hashedPassword,
       "user",
-      "active"
+      "pending_verification",
+      0
     );
 
-    const user = db
-      .prepare(`
-        SELECT id, full_name, email, role, status, two_factor_enabled, created_at, updated_at
-        FROM users
-        WHERE id = ?
-      `)
-      .get(result.lastInsertRowid);
+    const user = db.prepare(`
+      SELECT id, full_name, first_name, last_name, email, role, status, email_verified, email_verified_at,
+             two_factor_enabled, created_at, updated_at
+      FROM users
+      WHERE id = ?
+    `).get(result.lastInsertRowid);
 
-    const token = createToken(user);
+    const verification = createVerificationCode(user);
+    await sendVerificationEmail({
+      to: user.email,
+      fullName: user.full_name,
+      code: verification.code
+    });
 
     res.json({
       success: true,
-      message: "Đăng ký thành công",
-      token,
-      user
+      requires_verification: true,
+      email: user.email,
+      expires_at: verification.expiresAt,
+      message: "Registration successful. Please check your email for the verification code."
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: "Lỗi đăng ký tài khoản",
+      message: "Could not register account",
       error: error.message
     });
+  }
+};
+
+exports.verifyEmail = (req, res) => {
+  try {
+    const cleanEmail = String(req.body?.email || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").replace(/\s+/g, "");
+
+    if (!cleanEmail || !code) {
+      return res.status(400).json({ success: false, message: "Email and verification code are required" });
+    }
+
+    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(cleanEmail);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Account not found" });
+    }
+
+    if (Number(user.email_verified || 0) === 1 && user.status === "active") {
+      return res.json({ success: true, message: "Email is already verified" });
+    }
+
+    const record = latestVerificationCode(user.id);
+    if (!record) {
+      return res.status(400).json({ success: false, message: "Verification code not found. Please request a new code." });
+    }
+
+    if (Number(record.attempts || 0) >= 5) {
+      return res.status(429).json({ success: false, message: "Too many attempts. Please request a new code." });
+    }
+
+    if (new Date(record.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: "Verification code expired. Please request a new code." });
+    }
+
+    if (record.code_hash !== hashVerificationCode(code)) {
+      db.prepare("UPDATE email_verification_codes SET attempts = attempts + 1 WHERE id = ?").run(record.id);
+      return res.status(400).json({ success: false, message: "Invalid verification code" });
+    }
+
+    const transaction = db.transaction(() => {
+      db.prepare("UPDATE email_verification_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?").run(record.id);
+      db.prepare(`
+        UPDATE users
+        SET status = 'active', email_verified = 1, email_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(user.id);
+    });
+    transaction();
+
+    const verifiedUser = db.prepare(`
+      SELECT id, full_name, first_name, last_name, email, role, status, email_verified, email_verified_at,
+             two_factor_enabled, created_at, updated_at
+      FROM users
+      WHERE id = ?
+    `).get(user.id);
+    const safeUser = getSafeUser(verifiedUser);
+    const token = createToken(safeUser);
+
+    res.json({
+      success: true,
+      message: "Email verified successfully",
+      token,
+      user: safeUser
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not verify email", error: error.message });
+  }
+};
+
+exports.resendVerification = async (req, res) => {
+  try {
+    const cleanEmail = String(req.body?.email || "").trim().toLowerCase();
+    if (!cleanEmail) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+
+    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(cleanEmail);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Account not found" });
+    }
+
+    if (Number(user.email_verified || 0) === 1 && user.status === "active") {
+      return res.status(400).json({ success: false, message: "Email is already verified" });
+    }
+
+    const latest = latestVerificationCode(user.id);
+    if (latest && Date.now() - new Date(latest.created_at).getTime() < 60 * 1000) {
+      return res.status(429).json({ success: false, message: "Please wait 60 seconds before requesting another code" });
+    }
+
+    const verification = createVerificationCode(user);
+    await sendVerificationEmail({
+      to: user.email,
+      fullName: user.full_name,
+      code: verification.code
+    });
+
+    res.json({
+      success: true,
+      email: user.email,
+      expires_at: verification.expiresAt,
+      message: "Verification code sent"
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not resend verification code", error: error.message });
   }
 };
 
@@ -203,7 +407,7 @@ exports.login = (req, res) => {
       });
     }
 
-    if (user.status !== "active") {
+    if (user.status !== "active" && user.status !== "pending_verification") {
       return res.status(403).json({
         success: false,
         message: "Tài khoản đã bị khóa"
@@ -216,6 +420,15 @@ exports.login = (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Email hoặc mật khẩu không đúng"
+      });
+    }
+
+    if (Number(user.email_verified ?? 1) !== 1 || user.status === "pending_verification") {
+      return res.status(403).json({
+        success: false,
+        requires_verification: true,
+        email: user.email,
+        message: "Please verify your email before signing in"
       });
     }
 
@@ -290,18 +503,20 @@ exports.updateProfile = (req, res) => {
     `).run(fullName, email, req.user.id);
 
     const user = db.prepare(`
-      SELECT id, full_name, email, role, status, two_factor_enabled, created_at, updated_at
+      SELECT id, full_name, first_name, last_name, email, role, status, email_verified, email_verified_at,
+             two_factor_enabled, created_at, updated_at
       FROM users
       WHERE id = ?
     `).get(req.user.id);
 
-    const token = createToken(user);
+    const safeUser = getSafeUser(user);
+    const token = createToken(safeUser);
 
     res.json({
       success: true,
       message: "Profile updated",
       token,
-      user
+      user: safeUser
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not update profile", error: error.message });
@@ -362,13 +577,15 @@ exports.enableTwoFactor = (req, res) => {
     `).run(req.user.id);
 
     const updatedUser = db.prepare(`
-      SELECT id, full_name, email, role, status, two_factor_enabled, created_at, updated_at
+      SELECT id, full_name, first_name, last_name, email, role, status, email_verified, email_verified_at,
+             two_factor_enabled, created_at, updated_at
       FROM users
       WHERE id = ?
     `).get(req.user.id);
-    const token = createToken(updatedUser);
+    const safeUser = getSafeUser(updatedUser);
+    const token = createToken(safeUser);
 
-    res.json({ success: true, message: "2FA enabled", token, user: updatedUser });
+    res.json({ success: true, message: "2FA enabled", token, user: safeUser });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not enable 2FA", error: error.message });
   }
@@ -396,13 +613,15 @@ exports.disableTwoFactor = (req, res) => {
     `).run(req.user.id);
 
     const updatedUser = db.prepare(`
-      SELECT id, full_name, email, role, status, two_factor_enabled, created_at, updated_at
+      SELECT id, full_name, first_name, last_name, email, role, status, email_verified, email_verified_at,
+             two_factor_enabled, created_at, updated_at
       FROM users
       WHERE id = ?
     `).get(req.user.id);
-    const token = createToken(updatedUser);
+    const safeUser = getSafeUser(updatedUser);
+    const token = createToken(safeUser);
 
-    res.json({ success: true, message: "2FA disabled", token, user: updatedUser });
+    res.json({ success: true, message: "2FA disabled", token, user: safeUser });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not disable 2FA", error: error.message });
   }
@@ -467,10 +686,15 @@ exports.getAllUsers = (req, res) => {
       LEFT JOIN partners p ON p.id = g.partner_id
       GROUP BY u.id
       ORDER BY u.id DESC
-    `).all().map((item) => ({
-      ...item,
-      assigned_groups: parseJsonArray(item.assigned_groups).filter(Boolean)
-    }));
+    `).all().map((item) => {
+      const roles = normalizeRoleList(item.role);
+      return {
+        ...item,
+        role: roles[0] || "user",
+        roles,
+        assigned_groups: parseJsonArray(item.assigned_groups).filter(Boolean)
+      };
+    });
 
     res.json({
       success: true,
@@ -489,11 +713,10 @@ exports.getAllUsers = (req, res) => {
 exports.updateUserRole = (req, res) => {
   try {
     const { id } = req.params;
-    const { role } = req.body;
+    const requestedRoles = Array.isArray(req.body?.roles) ? req.body.roles : [req.body?.role];
+    const roles = normalizeRoleList(requestedRoles);
 
-    const allowedRoles = ["admin", "Report Manager", "Channel Management", "Partner", "user"];
-
-    if (!allowedRoles.includes(role)) {
+    if (!roles.length || roles.some((role) => !ROLE_OPTIONS.includes(role))) {
       return res.status(400).json({
         success: false,
         message: "Role không hợp lệ"
@@ -515,9 +738,9 @@ exports.updateUserRole = (req, res) => {
       UPDATE users
       SET role = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(role, id);
+    `).run(serializeRoles(roles), id);
 
-    if (role !== "Partner") {
+    if (!roles.includes("Partner")) {
       db.prepare("DELETE FROM user_group_permissions WHERE user_id = ?").run(id);
     }
 
@@ -597,7 +820,7 @@ exports.updateUserGroups = (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    if (String(user.role || "").trim().toLowerCase() !== "partner") {
+    if (!userHasRole(user, "Partner")) {
       return res.status(400).json({ success: false, message: "Only Partner role can be assigned groups" });
     }
 
