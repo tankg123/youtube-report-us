@@ -60,7 +60,22 @@ async function sendVerificationEmail({ to, fullName, code }) {
   });
 }
 
+async function sendMail({ to, subject, text, html }) {
+  const brandName = process.env.SMTP_FROM_NAME || "ANS Network";
+  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const transporter = createTransporter();
+
+  return transporter.sendMail({
+    from: `"${brandName}" <${fromEmail}>`,
+    to,
+    subject,
+    text,
+    html
+  });
+}
+
 module.exports = {
   sendVerificationEmail,
+  sendMail,
   smtpEnabled
 };

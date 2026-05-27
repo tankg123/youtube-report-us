@@ -144,9 +144,16 @@ db.exec(`
     phone TEXT,
     counter_email TEXT,
     address TEXT,
+    payment_method TEXT NOT NULL DEFAULT 'pingpongx',
     pingpongx TEXT,
     bank_name TEXT,
+    bank_holder TEXT,
     account_number TEXT,
+    swift_code TEXT,
+    bank_branch TEXT,
+    partner_status TEXT NOT NULL DEFAULT 'active',
+    request_token TEXT,
+    request_submitted_at DATETIME,
     contract_status TEXT NOT NULL DEFAULT 'not_created',
     contract_notes TEXT,
     contract_sent_at DATETIME,
@@ -502,11 +509,69 @@ db.exec(`
     FOREIGN KEY (product_id) REFERENCES content_id_products(id) ON DELETE SET NULL,
     FOREIGN KEY (track_id) REFERENCES content_id_tracks(id) ON DELETE SET NULL
   );
+
+  CREATE TABLE IF NOT EXISTS email_notification_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    partner_id INTEGER,
+    partner_name TEXT,
+    recipient_email TEXT NOT NULL,
+    report_month TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent',
+    error_message TEXT,
+    sent_by INTEGER,
+    sent_by_name TEXT,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE SET NULL,
+    FOREIGN KEY (sent_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS email_notification_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_month TEXT NOT NULL,
+    partner_ids TEXT NOT NULL DEFAULT '[]',
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    send_at DATETIME NOT NULL,
+    follow_up_days INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    first_sent_at DATETIME,
+    follow_up_sent_at DATETIME,
+    next_run_at DATETIME NOT NULL,
+    last_error TEXT,
+    created_by INTEGER,
+    created_by_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
 `);
 
 const partnerColumns = db.prepare("PRAGMA table_info(partners)").all();
 if (!partnerColumns.some((column) => column.name === "contract_status")) {
   db.exec("ALTER TABLE partners ADD COLUMN contract_status TEXT NOT NULL DEFAULT 'not_created'");
+}
+if (!partnerColumns.some((column) => column.name === "partner_status")) {
+  db.exec("ALTER TABLE partners ADD COLUMN partner_status TEXT NOT NULL DEFAULT 'active'");
+}
+if (!partnerColumns.some((column) => column.name === "request_token")) {
+  db.exec("ALTER TABLE partners ADD COLUMN request_token TEXT");
+}
+if (!partnerColumns.some((column) => column.name === "request_submitted_at")) {
+  db.exec("ALTER TABLE partners ADD COLUMN request_submitted_at DATETIME");
+}
+if (!partnerColumns.some((column) => column.name === "payment_method")) {
+  db.exec("ALTER TABLE partners ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'pingpongx'");
+}
+if (!partnerColumns.some((column) => column.name === "bank_holder")) {
+  db.exec("ALTER TABLE partners ADD COLUMN bank_holder TEXT");
+}
+if (!partnerColumns.some((column) => column.name === "swift_code")) {
+  db.exec("ALTER TABLE partners ADD COLUMN swift_code TEXT");
+}
+if (!partnerColumns.some((column) => column.name === "bank_branch")) {
+  db.exec("ALTER TABLE partners ADD COLUMN bank_branch TEXT");
 }
 if (!partnerColumns.some((column) => column.name === "contract_notes")) {
   db.exec("ALTER TABLE partners ADD COLUMN contract_notes TEXT");

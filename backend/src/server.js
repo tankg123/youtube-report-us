@@ -15,7 +15,10 @@ const reportRoutes = require("./routes/reportRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const contentIdRoutes = require("./routes/contentIdRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
+const emailRoutes = require("./routes/emailRoutes");
+const publicRoutes = require("./routes/publicRoutes");
 const { syncVideosNow } = require("./controllers/videoController");
+const { processDueEmailSchedules } = require("./controllers/emailController");
 const apiKeyMiddleware = require("./middlewares/apiKeyMiddleware");
 
 const app = express();
@@ -58,6 +61,7 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+app.use("/api/public", publicRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/channels", channelRoutes);
 app.use("/api/videos", videoRoutes);
@@ -65,6 +69,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/content-id", contentIdRoutes);
 app.use("/api/expenses", expenseRoutes);
+app.use("/api/email", emailRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
@@ -74,6 +79,7 @@ app.use((req, res) => {
 });
 
 let videoSyncRunning = false;
+let emailScheduleRunning = false;
 
 function millisecondsUntilNextBangkokMidnight() {
   const now = new Date();
@@ -115,7 +121,27 @@ function scheduleDailyVideoSync() {
   }, delay);
 }
 
+async function runEmailScheduleTick() {
+  if (emailScheduleRunning) return;
+
+  try {
+    emailScheduleRunning = true;
+    const processed = await processDueEmailSchedules();
+    if (processed) console.log(`[email-schedule] Processed ${processed} due schedule(s)`);
+  } catch (error) {
+    console.error("[email-schedule] Failed:", error.message);
+  } finally {
+    emailScheduleRunning = false;
+  }
+}
+
+function scheduleEmailNotifications() {
+  setTimeout(runEmailScheduleTick, 3000);
+  setInterval(runEmailScheduleTick, 60 * 1000);
+}
+
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
   scheduleDailyVideoSync();
+  scheduleEmailNotifications();
 });

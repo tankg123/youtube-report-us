@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
 const db = require("../config/database");
@@ -1554,7 +1555,12 @@ exports.deleteCompany = (req, res) => {
 exports.getPartners = (req, res) => {
   try {
     syncExpiredPartnerContracts();
-    const rows = db.prepare("SELECT * FROM partners ORDER BY updated_at DESC, id DESC").all();
+    const scope = String(req.query.scope || "");
+    const rows = db.prepare(`
+      SELECT * FROM partners
+      ${scope === "active" ? "WHERE partner_status = 'active'" : ""}
+      ORDER BY updated_at DESC, id DESC
+    `).all();
     res.json({ success: true, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: "Lỗi lấy partner", error: error.message });
@@ -1574,10 +1580,17 @@ const PARTNER_IMPORT_HEADERS = {
   email_counter_control: "counter_email",
   counter_email: "counter_email",
   address: "address",
+  payment_method: "payment_method",
+  payment_type: "payment_method",
   pingpongx: "pingpongx",
+  pingpongx_email: "pingpongx",
   payment_number: "account_number",
   account_number: "account_number",
   bank_name: "bank_name",
+  bank_holder: "bank_holder",
+  account_holder: "bank_holder",
+  swift_code: "swift_code",
+  bank_branch: "bank_branch",
   note: "internal_notes",
   internal_notes: "internal_notes",
   contract_status: "contract_status",
@@ -1593,6 +1606,7 @@ const PARTNER_IMPORT_HEADERS = {
 };
 
 const PARTNER_CONTRACT_STATUSES = ["incomplete_info", "not_created", "sent_waiting", "done", "renewal_needed"];
+const PARTNER_STATUSES = ["request_sent", "request_done", "active"];
 
 function todaySqlDate() {
   return new Date().toISOString().slice(0, 10);
@@ -1651,9 +1665,15 @@ function normalizePartnerImportRow(raw) {
   partner.phone = partner.phone || "";
   partner.counter_email = partner.counter_email || "";
   partner.address = partner.address || "";
+  partner.payment_method = ["pingpongx", "bank"].includes(String(partner.payment_method || "").toLowerCase())
+    ? String(partner.payment_method).toLowerCase()
+    : "pingpongx";
   partner.pingpongx = partner.pingpongx || "";
   partner.bank_name = partner.bank_name || "";
+  partner.bank_holder = partner.bank_holder || "";
   partner.account_number = partner.account_number || "";
+  partner.swift_code = partner.swift_code || "";
+  partner.bank_branch = partner.bank_branch || "";
   partner.internal_notes = partner.internal_notes || "";
   partner.contract_status = PARTNER_CONTRACT_STATUSES.includes(partner.contract_status) ? partner.contract_status : "not_created";
   partner.contract_notes = partner.contract_notes || "";
@@ -1687,6 +1707,162 @@ function validatePartnerContractPayload(status, data) {
   return null;
 }
 
+function publicPartnerPayload(partner) {
+  if (!partner || !partner.request_token || partner.partner_status === "active") return null;
+  return {
+    id: partner.id,
+    partner_name: partner.partner_name,
+    display_name: partner.display_name,
+    email: partner.email,
+    contact_name: partner.contact_name,
+    phone: partner.phone,
+    counter_email: partner.counter_email,
+    address: partner.address,
+    payment_method: partner.payment_method || "pingpongx",
+    pingpongx: partner.pingpongx,
+    bank_name: partner.bank_name,
+    bank_holder: partner.bank_holder,
+    account_number: partner.account_number,
+    swift_code: partner.swift_code,
+    bank_branch: partner.bank_branch,
+    internal_notes: partner.internal_notes,
+    partner_status: partner.partner_status
+  };
+}
+
+exports.createPartnerRequest = (req, res) => {
+  try {
+    const partnerName = String(req.body?.partner_name || "").trim();
+    if (!partnerName) {
+      return res.status(400).json({ success: false, message: "Partner name is required" });
+    }
+
+    const token = crypto.randomBytes(24).toString("hex");
+    const result = db.prepare(`
+      INSERT INTO partners (partner_name, partner_status, request_token, contract_status, internal_notes)
+      VALUES (?, 'request_sent', ?, 'not_created', ?)
+    `).run(partnerName, token, req.body?.internal_notes || "");
+
+    const partner = db.prepare("SELECT * FROM partners WHERE id = ?").get(result.lastInsertRowid);
+    res.json({ success: true, message: "Partner request link created", data: { ...partner, request_url: `/partner-request/${token}` } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not create partner request", error: error.message });
+  }
+};
+
+exports.approvePartnerRequest = (req, res) => {
+  try {
+    const current = db.prepare("SELECT * FROM partners WHERE id = ?").get(req.params.id);
+    if (!current) return res.status(404).json({ success: false, message: "Partner not found" });
+    if (current.partner_status !== "request_done") {
+      return res.status(400).json({ success: false, message: "Partner request must be completed before approval" });
+    }
+
+    db.prepare(`
+      UPDATE partners
+      SET partner_status = 'active', request_token = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(req.params.id);
+    res.json({ success: true, message: "Partner approved" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not approve partner", error: error.message });
+  }
+};
+
+exports.deletePartnerRequestLink = (req, res) => {
+  try {
+    const current = db.prepare("SELECT * FROM partners WHERE id = ?").get(req.params.id);
+    if (!current) return res.status(404).json({ success: false, message: "Partner not found" });
+    if (current.partner_status === "request_sent") {
+      db.prepare("DELETE FROM partners WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, message: "Partner request link deleted" });
+    }
+
+    db.prepare("UPDATE partners SET request_token = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    res.json({ success: true, message: "Partner request link removed" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not delete request link", error: error.message });
+  }
+};
+
+exports.getPublicPartnerRequest = (req, res) => {
+  try {
+    const partner = db.prepare("SELECT * FROM partners WHERE request_token = ?").get(req.params.token);
+    const data = publicPartnerPayload(partner);
+    if (!data) return res.status(404).json({ success: false, message: "Partner request link is invalid or no longer available" });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not load partner request", error: error.message });
+  }
+};
+
+exports.submitPublicPartnerRequest = (req, res) => {
+  try {
+    const partner = db.prepare("SELECT * FROM partners WHERE request_token = ?").get(req.params.token);
+    if (!partner || partner.partner_status === "active") {
+      return res.status(404).json({ success: false, message: "Partner request link is invalid or no longer available" });
+    }
+
+    const data = req.body || {};
+    if (!String(data.partner_name || partner.partner_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "Partner name is required" });
+    }
+    const paymentMethod = String(data.payment_method || "pingpongx").toLowerCase() === "bank" ? "bank" : "pingpongx";
+    const required = [
+      ["email", "Email"],
+      ["contact_name", "Contact person"],
+      ["phone", "Phone"],
+      ["address", "Address"]
+    ];
+    if (paymentMethod === "pingpongx") {
+      required.push(["pingpongx", "PingPongX email"]);
+    } else {
+      required.push(
+        ["bank_name", "Bank name"],
+        ["bank_holder", "Bank holder"],
+        ["account_number", "Account number"],
+        ["swift_code", "SWIFT code"],
+        ["bank_branch", "Bank branch"]
+      );
+    }
+    const missing = required.filter(([key]) => !String(data[key] || "").trim()).map(([, label]) => label);
+    if (missing.length) {
+      return res.status(400).json({ success: false, message: `Please complete required fields: ${missing.join(", ")}` });
+    }
+
+    db.prepare(`
+      UPDATE partners SET
+        partner_name = ?, display_name = ?, email = ?, contact_name = ?, phone = ?,
+        counter_email = ?, address = ?, payment_method = ?, pingpongx = ?, bank_name = ?,
+        bank_holder = ?, account_number = ?, swift_code = ?, bank_branch = ?,
+        internal_notes = ?, partner_status = 'request_done', request_submitted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      data.partner_name || partner.partner_name,
+      data.display_name || "",
+      data.email || "",
+      data.contact_name || "",
+      data.phone || "",
+      data.counter_email || "",
+      data.address || "",
+      paymentMethod,
+      data.pingpongx || "",
+      data.bank_name || "",
+      data.bank_holder || "",
+      data.account_number || "",
+      data.swift_code || "",
+      data.bank_branch || "",
+      data.internal_notes || "",
+      partner.id
+    );
+
+    res.json({ success: true, message: "Partner request submitted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not submit partner request", error: error.message });
+  }
+};
+
 exports.importPartners = async (req, res) => {
   try {
     const { fileName = "", fileBase64 = "" } = req.body || {};
@@ -1709,19 +1885,21 @@ exports.importPartners = async (req, res) => {
     const insertStmt = db.prepare(`
       INSERT INTO partners (
         partner_name, display_name, email, contact_name, phone, counter_email,
-        address, pingpongx, bank_name, account_number, contract_status,
+        address, payment_method, pingpongx, bank_name, bank_holder, account_number,
+        swift_code, bank_branch, contract_status,
         contract_notes, contract_sent_at, contract_signed_at, contract_start_at,
         contract_end_at, contract_file_name, contract_file_data_url, internal_notes,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
     `);
 
     const updateStmt = db.prepare(`
       UPDATE partners SET
         partner_name = ?, display_name = ?, email = ?, contact_name = ?, phone = ?,
-        counter_email = ?, address = ?, pingpongx = ?, bank_name = ?,
-        account_number = ?, contract_status = ?, contract_notes = ?, contract_sent_at = ?,
+        counter_email = ?, address = ?, payment_method = ?, pingpongx = ?, bank_name = ?,
+        bank_holder = ?, account_number = ?, swift_code = ?, bank_branch = ?,
+        contract_status = ?, contract_notes = ?, contract_sent_at = ?,
         contract_signed_at = ?, contract_start_at = ?, contract_end_at = ?, contract_file_name = ?,
         contract_file_data_url = ?, internal_notes = ?, updated_at = COALESCE(?, CURRENT_TIMESTAMP)
       WHERE id = ?
@@ -1756,9 +1934,13 @@ exports.importPartners = async (req, res) => {
             partner.phone,
             partner.counter_email,
             partner.address,
+            partner.payment_method,
             partner.pingpongx,
             partner.bank_name,
+            partner.bank_holder,
             partner.account_number,
+            partner.swift_code,
+            partner.bank_branch,
             partner.contract_status,
             partner.contract_notes,
             partner.contract_sent_at,
@@ -1783,9 +1965,13 @@ exports.importPartners = async (req, res) => {
           partner.phone,
           partner.counter_email,
           partner.address,
+          partner.payment_method,
           partner.pingpongx,
           partner.bank_name,
+          partner.bank_holder,
           partner.account_number,
+          partner.swift_code,
+          partner.bank_branch,
           partner.contract_status,
           partner.contract_notes,
           partner.contract_sent_at,
@@ -1819,6 +2005,9 @@ exports.createPartner = (req, res) => {
     const contractStatus = PARTNER_CONTRACT_STATUSES.includes(String(data.contract_status || ""))
       ? data.contract_status
       : "not_created";
+    const partnerStatus = PARTNER_STATUSES.includes(String(data.partner_status || ""))
+      ? data.partner_status
+      : "active";
     const contractError = validatePartnerContractPayload(contractStatus, data);
     if (contractError) {
       return res.status(400).json({ success: false, message: contractError });
@@ -1827,11 +2016,13 @@ exports.createPartner = (req, res) => {
     const result = db.prepare(`
       INSERT INTO partners (
         partner_name, display_name, email, contact_name, phone, counter_email,
-        address, pingpongx, bank_name, account_number, contract_status,
+        address, payment_method, pingpongx, bank_name, bank_holder, account_number,
+        swift_code, bank_branch, partner_status, request_token,
+        request_submitted_at, contract_status,
         contract_notes, contract_sent_at, contract_signed_at, contract_start_at,
         contract_end_at, contract_file_name, contract_file_data_url, internal_notes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.partner_name,
       data.display_name || "",
@@ -1840,9 +2031,16 @@ exports.createPartner = (req, res) => {
       data.phone || "",
       data.counter_email || "",
       data.address || "",
+      String(data.payment_method || "pingpongx").toLowerCase() === "bank" ? "bank" : "pingpongx",
       data.pingpongx || "",
       data.bank_name || "",
+      data.bank_holder || "",
       data.account_number || "",
+      data.swift_code || "",
+      data.bank_branch || "",
+      partnerStatus,
+      data.request_token || null,
+      data.request_submitted_at || null,
       contractStatus,
       data.contract_notes || "",
       data.contract_sent_at || null,
@@ -1871,6 +2069,9 @@ exports.updatePartner = (req, res) => {
     const contractStatus = PARTNER_CONTRACT_STATUSES.includes(String(pick("contract_status", "not_created")))
       ? pick("contract_status", "not_created")
       : "not_created";
+    const partnerStatus = PARTNER_STATUSES.includes(String(pick("partner_status", "active")))
+      ? pick("partner_status", "active")
+      : "active";
     const contractError = validatePartnerContractPayload(contractStatus, {
       contract_start_at: pick("contract_start_at", null),
       contract_end_at: pick("contract_end_at", null),
@@ -1883,8 +2084,10 @@ exports.updatePartner = (req, res) => {
     db.prepare(`
       UPDATE partners SET
         partner_name = ?, display_name = ?, email = ?, contact_name = ?, phone = ?,
-        counter_email = ?, address = ?, pingpongx = ?, bank_name = ?,
-        account_number = ?, contract_status = ?, contract_notes = ?, contract_sent_at = ?,
+        counter_email = ?, address = ?, payment_method = ?, pingpongx = ?, bank_name = ?,
+        bank_holder = ?, account_number = ?, swift_code = ?, bank_branch = ?,
+        partner_status = ?, request_token = ?, request_submitted_at = ?,
+        contract_status = ?, contract_notes = ?, contract_sent_at = ?,
         contract_signed_at = ?, contract_start_at = ?, contract_end_at = ?, contract_file_name = ?,
         contract_file_data_url = ?, internal_notes = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -1896,9 +2099,16 @@ exports.updatePartner = (req, res) => {
       pick("phone"),
       pick("counter_email"),
       pick("address"),
+      String(pick("payment_method", "pingpongx")).toLowerCase() === "bank" ? "bank" : "pingpongx",
       pick("pingpongx"),
       pick("bank_name"),
+      pick("bank_holder"),
       pick("account_number"),
+      pick("swift_code"),
+      pick("bank_branch"),
+      partnerStatus,
+      pick("request_token", null) || null,
+      pick("request_submitted_at", null) || null,
       contractStatus,
       pick("contract_notes"),
       pick("contract_sent_at", null) || null,

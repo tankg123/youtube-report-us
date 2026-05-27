@@ -33,6 +33,9 @@ router.delete("/companies/:id", allowRoles(...REPORT_ROLES), reportController.de
 
 router.get("/partners", allowRoles(...PARTNER_ROLES), reportController.getPartners);
 router.post("/partners/import", allowRoles(...PARTNER_ROLES), reportController.importPartners);
+router.post("/partners/request", allowRoles(...PARTNER_ROLES), reportController.createPartnerRequest);
+router.post("/partners/:id/approve", allowRoles(...PARTNER_ROLES), reportController.approvePartnerRequest);
+router.delete("/partners/:id/request-link", allowRoles(...PARTNER_ROLES), reportController.deletePartnerRequestLink);
 router.post("/partners", allowRoles(...PARTNER_ROLES), reportController.createPartner);
 router.put("/partners/:id", allowRoles(...PARTNER_ROLES), reportController.updatePartner);
 router.delete("/partners/:id", allowRoles(...PARTNER_ROLES), reportController.deletePartner);
