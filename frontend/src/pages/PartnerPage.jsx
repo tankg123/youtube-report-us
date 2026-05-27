@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Building2, CreditCard, Edit3, Loader2, Mail, MapPin, Phone, Plus, Trash2, User, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Building2, CreditCard, Edit3, Loader2, Mail, MapPin, Phone, Plus, Trash2, Upload, User, X } from "lucide-react";
 import api from "../api/api";
 
 const emptyPartner = {
@@ -38,7 +38,9 @@ export default function PartnerPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState("");
+  const fileInputRef = useRef(null);
 
   async function fetchPartners() {
     try {
@@ -97,6 +99,43 @@ export default function PartnerPage() {
     }
   }
 
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function importPartners(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setMessage("Please select an .xlsx partner file");
+      return;
+    }
+
+    try {
+      setImporting(true);
+      const fileBase64 = arrayBufferToBase64(await file.arrayBuffer());
+      const res = await api.post("/reports/partners/import", {
+        fileName: file.name,
+        fileBase64
+      });
+      const data = res.data.data || {};
+      setMessage(`Imported ${file.name}: ${data.created || 0} created, ${data.updated || 0} updated, ${data.skipped || 0} skipped.`);
+      await fetchPartners();
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.response?.data?.error || "Could not import partners");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchPartners();
@@ -117,10 +156,22 @@ export default function PartnerPage() {
           <p className="text-slate-500 mt-2">Thêm, sửa, xóa thông tin đối tác và thanh toán.</p>
         </div>
 
-        <button onClick={openCreate} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl px-5 py-3 font-bold flex items-center justify-center gap-2">
-          <Plus size={18} />
-          Add partner
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={importPartners} />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl px-5 py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {importing ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+            Import partner
+          </button>
+          <button onClick={openCreate} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl px-5 py-3 font-bold flex items-center justify-center gap-2">
+            <Plus size={18} />
+            Add partner
+          </button>
+        </div>
       </div>
 
       {message && <div className="mb-5 bg-blue-50 border border-blue-100 text-blue-700 rounded-2xl px-5 py-4 font-medium">{message}</div>}

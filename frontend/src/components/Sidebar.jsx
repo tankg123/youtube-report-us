@@ -8,6 +8,7 @@ import {
   CircleDollarSign,
   Disc3,
   FileAudio,
+  FileSignature,
   FileSpreadsheet,
   FileVideo,
   Landmark,
@@ -43,11 +44,13 @@ export default function Sidebar() {
   const reportPaths = ["/report-dashboard", "/reports", "/channels", "/networks", "/exchange-rates", "/companies", "/groups"];
   const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/labels", "/content-id/artists"];
   const expensePaths = ["/expenses/overview", "/expenses/categories", "/expenses/transactions", "/expenses/accounts", "/expenses/revenue"];
+  const partnerPaths = ["/partners", "/partners/overview", "/partners/list", "/partners/contracts"];
   const settingsPaths = ["/settings/system", "/settings/content-id"];
   const [channelOpen, setChannelOpen] = useState(channelPaths.includes(location.pathname) || location.pathname === "/");
   const [reportOpen, setReportOpen] = useState(reportPaths.includes(location.pathname));
   const [contentIdOpen, setContentIdOpen] = useState(contentIdPaths.includes(location.pathname));
   const [expenseOpen, setExpenseOpen] = useState(expensePaths.includes(location.pathname));
+  const [partnerOpen, setPartnerOpen] = useState(partnerPaths.includes(location.pathname));
   const [settingsOpen, setSettingsOpen] = useState(settingsPaths.includes(location.pathname));
 
   const channelMenus = [
@@ -66,8 +69,13 @@ export default function Sidebar() {
     { name: t("group"), path: "/groups", icon: UsersRound }
   ];
 
+  const partnerMenus = [
+    { name: "Overview", path: "/partners/overview", icon: BarChart3 },
+    { name: "Partner", path: "/partners/list", icon: Building2 },
+    { name: "Contract", path: "/partners/contracts", icon: FileSignature }
+  ];
+
   const menus = [
-    ...(canViewPartner ? [{ name: t("partner"), path: "/partners", icon: Building2 }] : []),
     ...(canViewAccount ? [{ name: t("account"), path: "/account", icon: UserRound }] : [])
   ];
 
@@ -108,7 +116,7 @@ export default function Sidebar() {
           isDark ? "bg-slate-950/20" : "bg-slate-50/50"
         ].join(" ")}
       >
-        {(canViewReports || canViewChannelManagement || canViewContentId || canViewExpense) && (
+        {(canViewReports || canViewChannelManagement || canViewContentId || canViewExpense || canViewPartner) && (
           <>
           {canViewChannelManagement && (
           <div>
@@ -293,6 +301,55 @@ export default function Sidebar() {
                 ].map((item) => {
                   const Icon = item.icon;
                   const active = location.pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={[
+                        "flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all",
+                        active
+                          ? isDark
+                            ? "bg-blue-500/20 text-white"
+                            : "bg-blue-50 text-blue-700"
+                          : isDark
+                            ? "text-slate-400 hover:bg-slate-800 hover:text-white"
+                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                      ].join(" ")}
+                    >
+                      <Icon size={16} />
+                      <span className="font-medium">{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
+          {canViewPartner && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setPartnerOpen((open) => !open)}
+              className={[
+                "w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all",
+                partnerPaths.includes(location.pathname)
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-900/30"
+                  : isDark
+                    ? "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
+              ].join(" ")}
+            >
+              <Building2 size={20} />
+              <span className="font-medium flex-1 text-left">Partner & Contract</span>
+              <ChevronDown size={17} className={partnerOpen ? "rotate-180 transition" : "transition"} />
+            </button>
+
+            {partnerOpen && (
+              <div className={["mt-2 ml-6 space-y-1 border-l pl-3", isDark ? "border-slate-700" : "border-slate-200"].join(" ")}>
+                {partnerMenus.map((item) => {
+                  const Icon = item.icon;
+                  const active = location.pathname === item.path || (location.pathname === "/partners" && item.path === "/partners/overview");
                   return (
                     <Link
                       key={item.path}

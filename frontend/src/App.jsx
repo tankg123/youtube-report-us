@@ -7,7 +7,7 @@ import {
   useLocation,
   Navigate
 } from "react-router-dom";
-import { BarChart3, BriefcaseBusiness, Building2, ChevronDown, CircleDollarSign, Disc3, FileAudio, FileSpreadsheet, Landmark, Network, PackageSearch, Percent, ReceiptText, Settings, Tags, Users, UsersRound, Video, WalletCards, UserRound, Loader2, FileVideo, Mail, ShieldCheck, Sparkles, LogOut } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, Building2, ChevronDown, CircleDollarSign, Disc3, FileAudio, FileSignature, FileSpreadsheet, Landmark, Network, PackageSearch, Percent, ReceiptText, Settings, Tags, Users, UsersRound, Video, WalletCards, UserRound, Loader2, FileVideo, Mail, ShieldCheck, Sparkles, LogOut } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -22,6 +22,8 @@ import VerifyEmailPage from "./pages/VerifyEmailPage";
 import ManagerReportPage from "./pages/ManagerReportPage";
 import ReportDashboardPage from "./pages/ReportDashboardPage";
 import PartnerPage from "./pages/PartnerPage";
+import PartnerOverviewPage from "./pages/PartnerOverviewPage";
+import PartnerContractsPage from "./pages/PartnerContractsPage";
 import GroupChannelPage from "./pages/GroupChannelPage";
 import NetworkPage from "./pages/NetworkPage";
 import ExchangeRatePage from "./pages/ExchangeRatePage";
@@ -125,11 +127,13 @@ function MobileNav() {
   const reportPaths = ["/report-dashboard", "/reports", "/channels", "/networks", "/exchange-rates", "/companies", "/groups"];
   const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/labels", "/content-id/artists"];
   const expensePaths = ["/expenses/overview", "/expenses/categories", "/expenses/transactions", "/expenses/accounts", "/expenses/revenue"];
+  const partnerPaths = ["/partners", "/partners/overview", "/partners/list", "/partners/contracts"];
   const settingsPaths = ["/settings/system", "/settings/content-id"];
   const [channelOpen, setChannelOpen] = useState(channelPaths.includes(location.pathname) || location.pathname === "/");
   const [reportOpen, setReportOpen] = useState(reportPaths.includes(location.pathname));
   const [contentIdOpen, setContentIdOpen] = useState(contentIdPaths.includes(location.pathname));
   const [expenseOpen, setExpenseOpen] = useState(expensePaths.includes(location.pathname));
+  const [partnerOpen, setPartnerOpen] = useState(partnerPaths.includes(location.pathname));
 
   const channelMenus = [
     { name: "Channel Management", path: "/channel-management", icon: Video },
@@ -177,12 +181,6 @@ function MobileNav() {
 
   const menus = [
     {
-      name: t("partner"),
-      path: "/partners",
-      icon: Building2,
-      show: canViewPartner
-    },
-    {
       name: t("account"),
       path: "/account",
       icon: UserRound,
@@ -215,7 +213,7 @@ function MobileNav() {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {(canViewChannelManagement || canViewReports || canViewContentId || canViewExpense) && (
+        {(canViewChannelManagement || canViewReports || canViewContentId || canViewExpense || canViewPartner) && (
           <div className="col-span-2">
             {canViewChannelManagement && (
             <>
@@ -371,6 +369,39 @@ function MobileNav() {
             )}
           </div>
         )}
+        {canViewPartner && (
+          <div className="col-span-2">
+            <button
+              type="button"
+              onClick={() => setPartnerOpen((open) => !open)}
+              className={[
+                "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-2xl text-sm font-bold mt-2",
+                partnerOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"
+              ].join(" ")}
+            >
+              <Building2 size={17} />
+              Partner & Contract
+              <ChevronDown size={16} className={partnerOpen ? "rotate-180 transition" : "transition"} />
+            </button>
+            {partnerOpen && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {[
+                  { name: "Overview", path: "/partners/overview", icon: BarChart3 },
+                  { name: "Partner", path: "/partners/list", icon: Building2 },
+                  { name: "Contract", path: "/partners/contracts", icon: FileSignature }
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const active = location.pathname === item.path || (location.pathname === "/partners" && item.path === "/partners/overview");
+                  return (
+                    <Link key={item.path} to={item.path} className={["flex items-center justify-center gap-2 px-3 py-2 rounded-2xl text-sm font-bold", active ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-slate-50 text-slate-600"].join(" ")}>
+                      <Icon size={16} /> {item.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {menus.map((item) => {
           const Icon = item.icon;
           const active = location.pathname === item.path;
@@ -446,7 +477,7 @@ function PrivateLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  const defaultPath = canViewChannelManagement ? "/channel-management" : canViewReports ? "/report-dashboard" : canViewExpense ? "/expenses/overview" : canViewContentId ? "/content-id/creator" : canViewPartnerGroups ? "/groups" : canViewPartner ? "/partners" : canViewAccount ? "/account" : canViewSettings ? "/settings/system" : canViewContentIdSettings ? "/settings/content-id" : "/locked";
+  const defaultPath = canViewChannelManagement ? "/channel-management" : canViewReports ? "/report-dashboard" : canViewExpense ? "/expenses/overview" : canViewContentId ? "/content-id/creator" : canViewPartnerGroups ? "/groups" : canViewPartner ? "/partners/overview" : canViewAccount ? "/account" : canViewSettings ? "/settings/system" : canViewContentIdSettings ? "/settings/content-id" : "/locked";
 
   return (
     <div className="min-h-screen flex bg-[#f3f6fb]">
@@ -556,9 +587,33 @@ function PrivateLayout() {
           />
           <Route
             path="/partners"
+            element={<Navigate to="/partners/overview" replace />}
+          />
+          <Route
+            path="/partners/overview"
+            element={
+              canViewPartner ? (
+                <PartnerOverviewPage />
+              ) : (
+                <Navigate to={defaultPath} replace />
+              )
+            }
+          />
+          <Route
+            path="/partners/list"
             element={
               canViewPartner ? (
                 <PartnerPage />
+              ) : (
+                <Navigate to={defaultPath} replace />
+              )
+            }
+          />
+          <Route
+            path="/partners/contracts"
+            element={
+              canViewPartner ? (
+                <PartnerContractsPage />
               ) : (
                 <Navigate to={defaultPath} replace />
               )
