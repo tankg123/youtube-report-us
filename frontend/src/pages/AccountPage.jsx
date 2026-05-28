@@ -16,7 +16,7 @@ import {
 import api from "../api/api";
 import { useAuth } from "../context/AuthContext";
 
-const ROLE_OPTIONS = ["admin", "Report Manager", "Channel Management", "Content ID", "Expense", "Partner", "Read Only", "user"];
+const ROLE_OPTIONS = ["admin", "Account", "Report Manager", "Channel Management", "Content ID", "Expense", "Partner", "Read Only", "user"];
 
 function roleList(item) {
   if (Array.isArray(item?.roles)) return item.roles.filter(Boolean);
@@ -38,7 +38,7 @@ function hasRole(item, role) {
 }
 
 export default function AccountPage() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, canViewAccount } = useAuth();
 
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -48,7 +48,7 @@ export default function AccountPage() {
   const [pendingGroup, setPendingGroup] = useState({});
 
   async function fetchUsers() {
-    if (!isAdmin) return;
+    if (!canViewAccount) return;
 
     try {
       setLoadingUsers(true);
@@ -172,7 +172,7 @@ export default function AccountPage() {
 
   useEffect(() => {
     fetchUsers();
-  }, [isAdmin]);
+  }, [canViewAccount]);
 
   return (
     <div className="p-5 lg:p-8">
@@ -252,7 +252,7 @@ export default function AccountPage() {
         </div>
       </div>
 
-      {isAdmin ? (
+      {canViewAccount ? (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-100 flex items-center justify-between">
             <div>
@@ -264,7 +264,7 @@ export default function AccountPage() {
               </div>
 
               <p className="text-slate-500 mt-1">
-                Chỉ Admin mới được xem và phân quyền user.
+                Admin và Account role được phân quyền user. Account role không thấy và không sửa được admin.
               </p>
             </div>
 
@@ -327,7 +327,7 @@ export default function AccountPage() {
                             className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold"
                           >
                             <option value="">Add role</option>
-                            {ROLE_OPTIONS.filter((role) => !roleList(item).includes(role)).map((role) => (
+                            {ROLE_OPTIONS.filter((role) => (isAdmin || role !== "admin") && !roleList(item).includes(role)).map((role) => (
                               <option key={role} value={role}>{role}</option>
                             ))}
                           </select>
@@ -457,7 +457,7 @@ export default function AccountPage() {
           </h2>
 
           <p className="text-slate-500 mt-2">
-            Bạn không phải Admin nên không thể xem danh sách user hoặc phân quyền tài khoản.
+            Bạn chưa có quyền Account nên không thể xem danh sách user hoặc phân quyền tài khoản.
           </p>
         </div>
       )}

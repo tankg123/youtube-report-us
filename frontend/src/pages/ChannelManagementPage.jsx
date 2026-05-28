@@ -183,9 +183,13 @@ export default function ChannelManagementPage() {
       setSaving(true);
       const res = await api.post("/channels/management/bulk", { channel_inputs: bulkText, ...bulkForm });
       const firstError = res.data.errors?.[0]?.error;
-      setMessage(`${res.data.message || "Channels created"}${res.data.errors?.length ? `, ${res.data.errors.length} errors${firstError ? `: ${firstError}` : ""}` : ""}`);
-      setBulkOpen(false);
-      setBulkText("");
+      const duplicates = (res.data.errors || []).filter((item) => item.duplicate);
+      const duplicateText = duplicates.length ? ` Duplicate skipped: ${duplicates.map((item) => `${item.title || item.channel_id || item.input} (${item.channel_id || item.input})`).join(", ")}` : "";
+      setMessage(`${res.data.message || "Channels created"}${res.data.errors?.length ? `, ${res.data.errors.length} errors${firstError ? `: ${firstError}` : ""}` : ""}${duplicateText}`);
+      if ((res.data.data || []).length) {
+        setBulkOpen(false);
+        setBulkText("");
+      }
       await fetchData();
     } catch (error) {
       setMessage(error.response?.data?.message || error.response?.data?.error || "Could not create channels");
@@ -390,6 +394,60 @@ export default function ChannelManagementPage() {
   }, [channels.length, page, pageSize]);
 
   const previewChannels = useMemo(() => bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean), [bulkText]);
+  const duplicatePreviewChannels = useMemo(
+    () => bulkPreview.filter((channel) => channel.duplicate || channel.status === "duplicate"),
+    [bulkPreview]
+  );
+  const creatablePreviewCount = useMemo(
+    () => Math.max(0, previewChannels.length - duplicatePreviewChannels.length),
+    [previewChannels.length, duplicatePreviewChannels.length]
+  );
+
+  function duplicateSummary(items = duplicatePreviewChannels) {
+    if (!items.length) return "";
+    return items
+      .map((channel) => `${channel.title || channel.channel_id} (${channel.channel_id})`)
+      .join(", ");
+  }
+
+  async function runBulkPreview({ showResult = false } = {}) {
+    if (!previewChannels.length) {
+      setBulkPreview([]);
+      if (showResult) setMessage("Please paste at least one channel to check.");
+      return;
+    }
+
+    try {
+      setBulkPreviewLoading(true);
+      const res = await api.post("/channels/management/preview", { channel_inputs: bulkText });
+      const data = res.data.data || [];
+      setBulkPreview(data);
+      if (showResult) {
+        const duplicates = data.filter((channel) => channel.duplicate || channel.status === "duplicate");
+        setMessage(
+          duplicates.length
+            ? `Duplicate channels found: ${duplicateSummary(duplicates)}`
+            : "No duplicate channels found."
+        );
+      }
+    } catch (error) {
+      const fallback = previewChannels.map((input) => ({
+        input,
+        channel_id: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+        title: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
+        thumbnail: "",
+        subscriber_count: 0,
+        view_count: 0,
+        video_count: 0,
+        status: "error",
+        status_error: error.response?.data?.message || "Could not preview channel"
+      }));
+      setBulkPreview(fallback);
+      if (showResult) setMessage(error.response?.data?.message || "Could not check duplicate channels");
+    } finally {
+      setBulkPreviewLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!bulkOpen || !previewChannels.length) {
@@ -402,26 +460,8 @@ export default function ChannelManagementPage() {
     setBulkPreviewLoading(true);
 
     const timer = window.setTimeout(async () => {
-      try {
-        const res = await api.post("/channels/management/preview", { channel_inputs: bulkText });
-        if (active) setBulkPreview(res.data.data || []);
-      } catch (error) {
-        if (active) {
-          setBulkPreview(previewChannels.map((input) => ({
-            input,
-            channel_id: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
-            title: input.match(/UC[a-zA-Z0-9_-]{10,}/)?.[0] || input,
-            thumbnail: "",
-            subscriber_count: 0,
-            view_count: 0,
-            video_count: 0,
-            status: "error",
-            status_error: error.response?.data?.message || "Could not preview channel"
-          })));
-        }
-      } finally {
-        if (active) setBulkPreviewLoading(false);
-      }
+      await runBulkPreview();
+      if (!active) return;
     }, 450);
 
     return () => {
@@ -694,7 +734,25 @@ export default function ChannelManagementPage() {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4 space-y-5">
-              <p className="font-bold text-slate-700">{previewChannels.length || 0} channels</p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="font-bold text-slate-700">
+                  {previewChannels.length || 0} channels
+                  {duplicatePreviewChannels.length ? (
+                    <span className="ml-2 rounded-full bg-red-50 px-3 py-1 text-xs font-black text-red-600">
+                      {duplicatePreviewChannels.length} duplicate
+                    </span>
+                  ) : null}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => runBulkPreview({ showResult: true })}
+                  disabled={bulkPreviewLoading || !previewChannels.length}
+                  className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 disabled:opacity-50"
+                >
+                  {bulkPreviewLoading ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                  Check duplicates
+                </button>
+              </div>
               <div className="grid lg:grid-cols-3 gap-4">
                 <SelectBox label="Network" value={bulkForm.network_id} onChange={(v) => setBulkForm({ ...bulkForm, network_id: v })} options={networks.map((n) => ({ value: n.id, label: n.name }))} fallback="All networks" />
                 <SelectBox label="Collaborator" value={bulkForm.collaborator_id} onChange={(v) => setBulkForm({ ...bulkForm, collaborator_id: v })} options={collaborators.map((c) => ({ value: c.id, label: c.display_name || c.name }))} fallback="No collaborator" />
@@ -705,6 +763,19 @@ export default function ChannelManagementPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <b className="text-slate-900">Sharing total:</b> Partner {sharingLabel(bulkForm.sharing_id) || "0%"} + Collaborator {sharingLabel(bulkForm.colab_sharing_id) || "0%"} must be max 100%.
               </div>
+
+              {duplicatePreviewChannels.length > 0 && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <b>Duplicate channels will not be added:</b>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {duplicatePreviewChannels.map((channel, index) => (
+                      <span key={`${channel.channel_id}-${index}`} className="rounded-full bg-white px-3 py-1 text-xs font-black text-red-600 border border-red-100">
+                        {channel.title || channel.channel_id} - {channel.channel_id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <textarea
                 value={bulkText}
@@ -737,12 +808,12 @@ export default function ChannelManagementPage() {
                     }))).map((channel, index) => (
                       <div
                         key={`${channel.input}-${index}`}
-                        className={`rounded-2xl border bg-white p-3 flex items-center gap-3 ${channel.status === "error" ? "border-red-200" : channel.status === "pending" ? "border-amber-200" : "border-slate-200"}`}
+                        className={`rounded-2xl border bg-white p-3 flex items-center gap-3 ${channel.status === "duplicate" ? "border-red-300 bg-red-50" : channel.status === "error" ? "border-red-200" : channel.status === "pending" ? "border-amber-200" : "border-slate-200"}`}
                       >
                         {channel.thumbnail ? (
                           <img src={channel.thumbnail} alt={channel.title || channel.channel_id} className="w-11 h-11 rounded-xl object-cover border border-slate-200" />
                         ) : (
-                          <div className={`w-11 h-11 rounded-xl text-white flex items-center justify-center font-black ${channel.status === "error" ? "bg-red-600" : channel.status === "pending" ? "bg-amber-500" : "bg-blue-600"}`}>
+                          <div className={`w-11 h-11 rounded-xl text-white flex items-center justify-center font-black ${channel.status === "duplicate" || channel.status === "error" ? "bg-red-600" : channel.status === "pending" ? "bg-amber-500" : "bg-blue-600"}`}>
                             {initials(channel.title || channel.channel_id)}
                           </div>
                         )}
@@ -754,7 +825,7 @@ export default function ChannelManagementPage() {
                             <span>Views <b className="text-slate-900">{formatCompact(channel.view_count)}</b></span>
                             <span>Videos <b className="text-slate-900">{formatCompact(channel.video_count)}</b></span>
                           </div>
-                          {(channel.status === "error" || channel.status === "pending") && (
+                          {(channel.status === "duplicate" || channel.status === "error" || channel.status === "pending") && (
                             <p
                               className={`mt-1 text-[11px] font-bold break-words ${channel.status === "pending" ? "text-amber-600" : "text-red-500"}`}
                               title={channel.status_error || "Could not get YouTube data"}
@@ -774,9 +845,9 @@ export default function ChannelManagementPage() {
             <div className="shrink-0 px-5 sm:px-6 py-4 border-t border-slate-200 bg-white flex justify-end gap-3">
               <button type="button" onClick={() => setBulkOpen(false)} className="px-5 py-3 rounded-2xl border border-slate-300 font-bold">Close</button>
               <button type="button" className="px-5 py-3 rounded-2xl border border-slate-300 font-bold">Back</button>
-              <button disabled={saving} className="px-6 py-3 rounded-2xl bg-blue-600 text-white font-black flex items-center gap-2 disabled:opacity-60">
+              <button disabled={saving || !creatablePreviewCount} className="px-6 py-3 rounded-2xl bg-blue-600 text-white font-black flex items-center gap-2 disabled:opacity-60">
                 {saving ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />}
-                Create {previewChannels.length || 0} channels
+                Create {creatablePreviewCount || 0} channels
               </button>
             </div>
           </form>

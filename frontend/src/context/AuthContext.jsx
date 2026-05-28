@@ -132,6 +132,7 @@ export function AuthProvider({ children }) {
       const isContentIdRole = hasRole(roles, "Content ID");
       const isExpenseRole = hasRole(roles, "Expense");
       const isPartnerRole = hasRole(roles, "Partner");
+      const isAccountRole = hasRole(roles, "Account");
       const isReadOnly = hasRole(roles, "Read Only");
       const canViewContentIdSettings = isAdmin || isContentIdRole;
 
@@ -154,6 +155,7 @@ export function AuthProvider({ children }) {
         isContentIdRole,
         isExpenseRole,
         isPartnerRole,
+        isAccountRole,
         isReadOnly,
         isManager: isReportManager,
         canViewReports: isAdmin || isReportManager,
@@ -163,7 +165,7 @@ export function AuthProvider({ children }) {
         canViewContentId: isAdmin || isContentIdRole,
         canViewExpense: isAdmin || isExpenseRole,
         canViewPartner: isAdmin || isReportManager || isChannelManagement,
-        canViewAccount: isAdmin,
+        canViewAccount: isAdmin || isAccountRole,
         canViewSettings: isAdmin,
         canViewContentIdSettings,
         isUser: role === "user"
