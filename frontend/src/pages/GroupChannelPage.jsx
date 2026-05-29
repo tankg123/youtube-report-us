@@ -678,6 +678,7 @@ export default function GroupChannelPage() {
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [includeSignatureBoxes, setIncludeSignatureBoxes] = useState(false);
   const [channelSort, setChannelSort] = useState({ key: "channel", direction: "asc" });
   const queryGroupId = searchParams.get("group_id");
   const queryMonth = searchParams.get("month");
@@ -879,7 +880,8 @@ export default function GroupChannelPage() {
         const res = await api.post(`/reports/groups/${detail.id}/export/pdf`, {
           month,
           company_id: selectedCompanyId || selectedCompany()?.id || "",
-          return_base64: true
+          return_base64: true,
+          include_signatures: includeSignatureBoxes
         }, {
           timeout: 60000,
           headers
@@ -1303,6 +1305,18 @@ export default function GroupChannelPage() {
                 <p><b className="text-slate-900">Month:</b> {monthLabel(detail.month)}</p>
                 <p><b className="text-slate-900">Payable:</b> {converted(detail.summary?.payable_converted ?? detail.summary?.paid_converted ?? 0, detail.currency)}</p>
               </div>
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeSignatureBoxes}
+                  onChange={(event) => setIncludeSignatureBoxes(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                />
+                <span>
+                  <span className="block font-black text-slate-900">Include signature boxes in PDF</span>
+                  <span className="block text-sm text-slate-500 mt-1">Add company and partner signature areas with Sign, Name, and Title lines.</span>
+                </span>
+              </label>
             </div>
             <div className="px-6 py-5 border-t border-slate-100 flex justify-end gap-3">
               <button type="button" onClick={() => setExportModalOpen(false)} className="px-5 py-3 rounded-2xl border border-slate-300 font-bold">Cancel</button>
