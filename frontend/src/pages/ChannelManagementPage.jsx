@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Download, Edit3, Filter, Grid2X2, List, Loader2, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, Copy, Download, Edit3, Filter, Grid2X2, List, Loader2, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, Unlink, X } from "lucide-react";
 import api from "../api/api";
 import PaginationFooter from "../components/PaginationFooter";
 
@@ -26,6 +26,7 @@ export default function ChannelManagementPage() {
     network_id: "",
     partner_id: "",
     sharing_id: "",
+    status: "",
     created_from: "",
     created_to: ""
   });
@@ -301,6 +302,20 @@ export default function ChannelManagementPage() {
     }
   }
 
+  async function unlinkManagedChannel(channel) {
+    if (!window.confirm(`Unlink ${channel.title || channel.channel_id}?`)) return;
+    try {
+      setSaving(true);
+      await api.post(`/channels/management/${channel.id}/unlink`);
+      showToast(`Unlinked channel ${channel.channel_id}`);
+      await fetchData();
+    } catch (error) {
+      setMessage(error.response?.data?.message || error.response?.data?.error || "Could not unlink channel");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function toggleSelected(id) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   }
@@ -540,10 +555,11 @@ export default function ChannelManagementPage() {
 
           {filtersOpen && (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="grid md:grid-cols-2 xl:grid-cols-5 gap-3">
+              <div className="grid md:grid-cols-2 xl:grid-cols-6 gap-3">
                 <SelectBox label="Network" value={filters.network_id} onChange={(v) => setFilters({ ...filters, network_id: v })} options={networks.map((n) => ({ value: n.id, label: n.name }))} fallback="All networks" />
                 <SelectBox label="Partner" value={filters.partner_id} onChange={(v) => setFilters({ ...filters, partner_id: v })} options={partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))} fallback="All partners" />
                 <SelectBox label="Rate Share" value={filters.sharing_id} onChange={(v) => setFilters({ ...filters, sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: `${s.name} (${s.share_rate}%)` }))} fallback="All rates" />
+                <SelectBox label="Status" value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })} options={[{ value: "active", label: "Active" }, { value: "error", label: "Error" }, { value: "unlinked", label: "Unlinked" }]} fallback="All statuses" />
                 <label>
                   <span className="font-black text-slate-700 mb-2 block">Added From</span>
                   <input type="date" value={filters.created_from} onChange={(event) => setFilters({ ...filters, created_from: event.target.value })} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500" />
@@ -556,7 +572,7 @@ export default function ChannelManagementPage() {
               <div className="mt-3 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setFilters({ network_id: "", partner_id: "", sharing_id: "", created_from: "", created_to: "" })}
+                  onClick={() => setFilters({ network_id: "", partner_id: "", sharing_id: "", status: "", created_from: "", created_to: "" })}
                   className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold"
                 >
                   Clear filters
@@ -613,8 +629,10 @@ export default function ChannelManagementPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {paginatedChannels.map((channel) => (
-                  <tr key={channel.id} className="hover:bg-slate-50/60">
+                {paginatedChannels.map((channel) => {
+                  const isUnlinked = channel.status === "unlinked";
+                  return (
+                  <tr key={channel.id} className={isUnlinked ? "bg-red-50/70 hover:bg-red-50 outline outline-1 outline-red-200" : "hover:bg-slate-50/60"}>
                     <td className="px-5 py-4">
                       <input type="checkbox" checked={selectedIds.includes(channel.id)} onChange={() => toggleSelected(channel.id)} />
                     </td>
@@ -635,7 +653,14 @@ export default function ChannelManagementPage() {
                           <span className="absolute -right-1 -top-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-white" />
                         </a>
                         <div>
-                          <p className="font-black text-slate-900">{channel.title || channel.channel_id}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-black text-slate-900">{channel.title || channel.channel_id}</p>
+                            {isUnlinked && (
+                              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-black uppercase text-red-600">
+                                Unlinked
+                              </span>
+                            )}
+                          </div>
                           <p className="text-slate-500 text-xs">{channel.custom_url || "-"}</p>
                           <div className="mt-1 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500 font-mono">
                             {channel.channel_id}
@@ -685,7 +710,7 @@ export default function ChannelManagementPage() {
                       </div>
                     </td>
                     <td className="px-5 py-4 min-w-[260px]">
-                      <input value={channel.note || ""} readOnly placeholder="Add note..." className="w-full rounded-2xl border border-slate-100 bg-slate-50 px-4 py-2 text-xs italic outline-none" />
+                      <input value={channel.note || ""} readOnly placeholder="Add note..." className={`w-full rounded-2xl border px-4 py-2 text-xs italic outline-none ${isUnlinked ? "border-red-100 bg-red-50 text-red-700" : "border-slate-100 bg-slate-50"}`} />
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -699,6 +724,16 @@ export default function ChannelManagementPage() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => unlinkManagedChannel(channel)}
+                          disabled={isUnlinked || saving}
+                          className="h-9 rounded-xl border border-amber-100 bg-amber-50 px-3 inline-flex items-center justify-center gap-1.5 text-xs font-black text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                          title={isUnlinked ? "Channel already unlinked" : "Unlink channel"}
+                        >
+                          <Unlink size={15} />
+                          Unlink
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => deleteManagedChannel(channel)}
                           className="w-9 h-9 rounded-xl border border-red-100 bg-red-50 inline-flex items-center justify-center text-red-500 hover:bg-red-100"
                           title="Delete channel"
@@ -708,7 +743,8 @@ export default function ChannelManagementPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             <PaginationFooter
@@ -880,7 +916,7 @@ export default function ChannelManagementPage() {
                 <SelectBox label="Collaborator" value={editForm.collaborator_id} onChange={(v) => setEditForm({ ...editForm, collaborator_id: v })} options={collaborators.map((c) => ({ value: c.id, label: c.display_name || c.name }))} fallback="No collaborator" />
                 <SelectBox label="Collaborator sharing" value={editForm.colab_sharing_id} onChange={(v) => setEditForm({ ...editForm, colab_sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: `${s.name}` }))} fallback="No collaborator sharing" />
                 <SelectBox label="Partner revenue sharing" value={editForm.sharing_id} onChange={(v) => setEditForm({ ...editForm, sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: `${s.name}` }))} fallback="No revenue sharing" />
-                <SelectBox label="Status" value={editForm.status} onChange={(v) => setEditForm({ ...editForm, status: v })} options={[{ value: "active", label: "Active" }, { value: "error", label: "Error" }]} fallback="Active" />
+                <SelectBox label="Status" value={editForm.status} onChange={(v) => setEditForm({ ...editForm, status: v })} options={[{ value: "active", label: "Active" }, { value: "error", label: "Error" }, { value: "unlinked", label: "Unlinked" }]} fallback="Active" />
               </div>
 
               <label className="block">
@@ -957,7 +993,7 @@ export default function ChannelManagementPage() {
                   label="Status"
                   value={bulkEditForm.status}
                   onChange={(v) => setBulkEditForm({ ...bulkEditForm, status: v })}
-                  options={[{ value: "active", label: "Active" }, { value: "error", label: "Error" }]}
+                  options={[{ value: "active", label: "Active" }, { value: "error", label: "Error" }, { value: "unlinked", label: "Unlinked" }]}
                   fallback="Keep current"
                   emptyValue="__keep"
                 />
