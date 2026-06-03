@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowUpDown, Calendar, Check, Copy, Download, Edit3, Loader2, MoreHorizontal, Plus, RefreshCw, Trash2, Users, X } from "lucide-react";
+import { ArrowUpDown, Calendar, Check, Copy, Download, Edit3, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Trash2, Users, X } from "lucide-react";
 import api from "../api/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -675,6 +675,7 @@ export default function GroupChannelPage() {
   const [addModal, setAddModal] = useState(false);
   const [channelInputs, setChannelInputs] = useState("");
   const [revenueShare, setRevenueShare] = useState("");
+  const [loadingPartnerChannels, setLoadingPartnerChannels] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -684,7 +685,10 @@ export default function GroupChannelPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [includeSignatureBoxes, setIncludeSignatureBoxes] = useState(false);
   const [groupListCollapsed, setGroupListCollapsed] = useState(false);
+  const [groupSearch, setGroupSearch] = useState("");
+  const [groupSortDirection, setGroupSortDirection] = useState("asc");
   const [channelSort, setChannelSort] = useState({ key: "channel", direction: "asc" });
+  const [channelSearch, setChannelSearch] = useState("");
   const queryGroupId = searchParams.get("group_id");
   const queryMonth = searchParams.get("month");
 
@@ -696,7 +700,20 @@ export default function GroupChannelPage() {
   }
 
   const sortedDetailChannels = useMemo(() => {
-    const rows = [...(detail?.channels || [])];
+    const keyword = channelSearch.trim().toLowerCase();
+    const rows = [...(detail?.channels || [])].filter((channel) => {
+      if (!keyword) return true;
+      return [
+        channel.title,
+        channel.channel_id,
+        channel.custom_url,
+        channel.network_name,
+        channel.status,
+        channel.status_error
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword));
+    });
     const direction = channelSort.direction === "asc" ? 1 : -1;
     const valueOf = (channel) => {
       if (channelSort.key === "channel") return String(channel.title || channel.channel_id || "").toLowerCase();
@@ -714,7 +731,22 @@ export default function GroupChannelPage() {
     });
 
     return rows;
-  }, [detail?.channels, channelSort]);
+  }, [detail?.channels, channelSearch, channelSort]);
+
+  const filteredSortedGroups = useMemo(() => {
+    const keyword = groupSearch.trim().toLowerCase();
+    const rows = groups.filter((group) => {
+      if (!keyword) return true;
+      return [group.group_name, group.partner_name, group.display_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(keyword));
+    });
+    const direction = groupSortDirection === "asc" ? 1 : -1;
+    return rows.sort((a, b) => (
+      String(a.group_name || a.partner_name || "")
+        .localeCompare(String(b.group_name || b.partner_name || ""), "en", { numeric: true, sensitivity: "base" }) * direction
+    ));
+  }, [groups, groupSearch, groupSortDirection]);
 
   async function fetchAll() {
     try {
@@ -832,12 +864,12 @@ export default function GroupChannelPage() {
 
     try {
       setSaving(true);
-      await api.post(`/reports/groups/${selectedId}/channels`, {
+      const res = await api.post(`/reports/groups/${selectedId}/channels`, {
         channel_inputs: channelInputs,
         revenue_share: revenueShare,
         month
       });
-      setMessage("Đã thêm channel vào group");
+      setMessage(res.data?.message || "Added channels to group");
       setAddModal(false);
       setChannelInputs("");
       setRevenueShare("");
@@ -847,6 +879,42 @@ export default function GroupChannelPage() {
       setMessage(error.response?.data?.message || "Lỗi thêm channel");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function loadPartnerManagedChannels() {
+    if (!detail?.partner_id) {
+      setMessage("This group does not have a partner to load channels from.");
+      return;
+    }
+
+    try {
+      setLoadingPartnerChannels(true);
+      const res = await api.get("/channels/management", { params: { partner_id: detail.partner_id, limit: 10000 } });
+      const partnerChannelIds = (res.data.data || [])
+        .map((channel) => channel.channel_id)
+        .filter(Boolean);
+
+      if (!partnerChannelIds.length) {
+        setMessage("No Channel Management channels found for this partner.");
+        return;
+      }
+
+      const existingLines = channelInputs
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const existingSet = new Set(existingLines.map((line) => line.toLowerCase()));
+      const newLines = partnerChannelIds.filter((channelId) => !existingSet.has(String(channelId).toLowerCase()));
+      const nextLines = [...existingLines, ...newLines];
+
+      setChannelInputs(nextLines.join("\n"));
+      setToast(`Loaded ${newLines.length} channel IDs from ${detail.partner_name || "partner"}`);
+      setTimeout(() => setToast(""), 5000);
+    } catch (error) {
+      setMessage(error.response?.data?.message || "Could not load partner channels from Channel Management");
+    } finally {
+      setLoadingPartnerChannels(false);
     }
   }
 
@@ -1021,10 +1089,28 @@ export default function GroupChannelPage() {
           <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
             <Users size={18} />
             <h2 className="font-black">Groups</h2>
+            <div className="relative ml-auto min-w-0 flex-1">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={groupSearch}
+                onChange={(event) => setGroupSearch(event.target.value)}
+                placeholder="Search group..."
+                className="h-8 w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-2 text-xs font-semibold outline-none focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setGroupSortDirection((direction) => (direction === "asc" ? "desc" : "asc"))}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+              title={`Sort groups ${groupSortDirection === "asc" ? "Z-A" : "A-Z"}`}
+            >
+              <ArrowUpDown size={13} />
+            </button>
             <button
               type="button"
               onClick={() => setGroupListCollapsed(true)}
-              className="ml-auto flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-blue-600"
               title="Hide group list"
             >
               <MoreHorizontal size={17} />
@@ -1034,9 +1120,11 @@ export default function GroupChannelPage() {
             <div className="py-12 flex justify-center"><Loader2 className="animate-spin text-blue-600" /></div>
           ) : groups.length === 0 ? (
             <div className="p-6 text-slate-500">Chưa có group nào.</div>
+          ) : filteredSortedGroups.length === 0 ? (
+            <div className="p-6 text-slate-500">No groups match this search.</div>
           ) : (
             <div className="p-3 space-y-2">
-              {groups.map((group) => (
+              {filteredSortedGroups.map((group) => (
                 <button
                   key={group.id}
                   onClick={() => {
@@ -1157,9 +1245,31 @@ export default function GroupChannelPage() {
               </section>
 
               <section className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+                <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
                   <h2 className="font-black">List Channels</h2>
-                  <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded-full">{detail.channels?.length || 0} channels</span>
+                  <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded-full">
+                    {channelSearch.trim() ? `${sortedDetailChannels.length} / ${detail.channels?.length || 0}` : detail.channels?.length || 0} channels
+                  </span>
+                  <div className="relative min-w-[240px] max-w-md flex-1 sm:flex-none">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="search"
+                      value={channelSearch}
+                      onChange={(event) => setChannelSearch(event.target.value)}
+                      placeholder="Search channel name, ID, keyword..."
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-9 text-sm outline-none focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                    />
+                    {channelSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setChannelSearch("")}
+                        className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        title="Clear search"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {!detail.channels?.length ? (
                   <div className="p-12 text-slate-500">Group này chưa có channel nào.</div>
@@ -1184,6 +1294,13 @@ export default function GroupChannelPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
+                        {sortedDetailChannels.length === 0 && (
+                          <tr>
+                            <td colSpan={canViewReports ? 5 : 4} className="px-5 py-10 text-center text-slate-500">
+                              No channels match this search.
+                            </td>
+                          </tr>
+                        )}
                         {sortedDetailChannels.map((channel) => (
                           <tr key={channel.group_channel_id}>
                             <td className="px-5 py-4">
@@ -1267,7 +1384,19 @@ export default function GroupChannelPage() {
             </div>
             <div className="p-6 space-y-5">
               <label>
-                <span className="font-black text-slate-900 mb-3 block">Channel IDs / Handles / Links</span>
+                <span className="mb-3 flex items-center justify-between gap-3">
+                  <span className="font-black text-slate-900">Channel IDs / Handles / Links</span>
+                  <button
+                    type="button"
+                    onClick={loadPartnerManagedChannels}
+                    disabled={loadingPartnerChannels || !detail?.partner_id}
+                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Load Channel Management channels assigned to this partner"
+                  >
+                    {loadingPartnerChannels ? <Loader2 className="animate-spin" size={14} /> : <Users size={14} />}
+                    Load partner channels
+                  </button>
+                </span>
                 <textarea
                   value={channelInputs}
                   onChange={(e) => setChannelInputs(e.target.value)}

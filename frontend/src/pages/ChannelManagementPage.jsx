@@ -234,10 +234,10 @@ export default function ChannelManagementPage() {
     window.setTimeout(() => setToast(""), 4000);
   }
 
-  async function copyChannelId(channelId) {
+  async function copyText(text) {
     const fallbackCopy = () => {
       const textarea = document.createElement("textarea");
-      textarea.value = channelId;
+      textarea.value = text;
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
       document.body.appendChild(textarea);
@@ -248,18 +248,46 @@ export default function ChannelManagementPage() {
 
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(channelId);
+        await navigator.clipboard.writeText(text);
       } else {
         fallbackCopy();
       }
-      showToast(`Copied channel ${channelId}`);
+      return true;
     } catch (error) {
       try {
         fallbackCopy();
-        showToast(`Copied channel ${channelId}`);
+        return true;
       } catch (fallbackError) {
-        setMessage("Could not copy channel ID");
+        return false;
       }
+    }
+  }
+
+  async function copyChannelId(channelId) {
+    const copied = await copyText(channelId);
+    if (copied) {
+      showToast(`Copied channel ${channelId}`);
+    } else {
+      setMessage("Could not copy channel ID");
+    }
+  }
+
+  async function copySelectedChannelIds() {
+    const selectedChannelIds = channels
+      .filter((channel) => selectedIds.includes(channel.id))
+      .map((channel) => channel.channel_id)
+      .filter(Boolean);
+
+    if (!selectedChannelIds.length) {
+      setMessage("No selected channel IDs to copy");
+      return;
+    }
+
+    const copied = await copyText(selectedChannelIds.join("\n"));
+    if (copied) {
+      showToast(`Copied ${selectedChannelIds.length} channel IDs`);
+    } else {
+      setMessage("Could not copy selected channel IDs");
     }
   }
 
@@ -647,6 +675,13 @@ export default function ChannelManagementPage() {
                 className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-sm flex items-center gap-2"
               >
                 <Edit3 size={16} /> Edit selected
+              </button>
+              <button
+                type="button"
+                onClick={copySelectedChannelIds}
+                className="px-4 py-2 rounded-xl bg-white text-slate-700 border border-slate-200 font-bold text-sm flex items-center gap-2"
+              >
+                <Copy size={16} /> Copy IDs
               </button>
               <button
                 type="button"
