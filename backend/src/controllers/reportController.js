@@ -459,9 +459,12 @@ function groupDetail(groupId, month) {
   const conversion = exchangeFactor(group.currency, month);
   const channels = db.prepare(`
     SELECT gc.id AS group_channel_id, gc.custom_share, gc.channel_id AS group_channel_ref,
-           c.*, COALESCE(cr.revenue, 0) AS revenue, cr.network_name
+           c.*, COALESCE(cr.revenue, 0) AS revenue,
+           COALESCE(NULLIF(cr.network_name, ''), mn.name, '-') AS network_name
     FROM group_channels gc
     LEFT JOIN channels c ON c.channel_id = gc.channel_id
+    LEFT JOIN managed_channels mc ON mc.channel_id = gc.channel_id
+    LEFT JOIN networks mn ON mn.id = mc.network_id
     LEFT JOIN (
       SELECT
         cr.channel_id,
@@ -1276,9 +1279,22 @@ function dashboardGroupTotals(month = "") {
     : db.prepare("SELECT DISTINCT month FROM channel_revenues ORDER BY month ASC").all().map((row) => row.month);
 
   const partnerMap = new Map();
+  const networkPaidMap = new Map();
+  const channelRevenueByNetwork = db.prepare(`
+    SELECT COALESCE(n.name, '-') AS network_name, COALESCE(SUM(cr.revenue), 0) AS revenue_usd
+    FROM channel_revenues cr
+    LEFT JOIN networks n ON n.id = cr.network_id
+    WHERE cr.month = ? AND cr.channel_id = ?
+    GROUP BY cr.network_id, n.name
+  `);
   let revenueUsd = 0;
   let paidUsd = 0;
   let feeUsd = 0;
+
+  function addNetworkPaid(networkName, amount) {
+    const key = String(networkName || "-").trim() || "-";
+    networkPaidMap.set(key, (networkPaidMap.get(key) || 0) + Number(amount || 0));
+  }
 
   for (const itemMonth of months) {
     for (const group of groups) {
@@ -1292,6 +1308,28 @@ function dashboardGroupTotals(month = "") {
       revenueUsd += groupRevenue;
       paidUsd += groupPaid;
       feeUsd += groupFee;
+
+      const feeMultiplier = Math.max(0, 1 - Number(detail.summary?.fee_rate || 0) / 100);
+      for (const channel of detail.channels || []) {
+        const channelShareUsd = Number(channel.share_amount || 0);
+        if (!channel.channel_id || channelShareUsd <= 0) continue;
+
+        const revenueRows = channelRevenueByNetwork.all(itemMonth, channel.channel_id)
+          .map((row) => ({
+            network_name: row.network_name || "-",
+            revenue_usd: Number(row.revenue_usd || 0)
+          }))
+          .filter((row) => row.revenue_usd > 0);
+        const channelRevenueTotal = revenueRows.reduce((sum, row) => sum + row.revenue_usd, 0);
+
+        if (channelRevenueTotal > 0) {
+          for (const row of revenueRows) {
+            addNetworkPaid(row.network_name, channelShareUsd * (row.revenue_usd / channelRevenueTotal) * feeMultiplier);
+          }
+        } else {
+          addNetworkPaid(channel.network_name || "-", channelShareUsd * feeMultiplier);
+        }
+      }
 
       const partnerId = detail.partner_id;
       if (!partnerMap.has(partnerId)) {
@@ -1336,8 +1374,55 @@ function dashboardGroupTotals(month = "") {
     total_paid_usd: paidUsd,
     total_fee_usd: feeUsd,
     total_profit_usd: revenueUsd - paidUsd,
+    network_paid: [...networkPaidMap.entries()].map(([network_name, paid_usd]) => ({ network_name, paid_usd })),
     top_partners: topPartners
   };
+}
+
+function dashboardRevenueByNetwork(month = "") {
+  return db.prepare(`
+    SELECT COALESCE(n.name, '-') AS network_name, COALESCE(SUM(cr.revenue), 0) AS revenue_usd
+    FROM channel_revenues cr
+    LEFT JOIN networks n ON n.id = cr.network_id
+    WHERE (? = '' OR cr.month = ?)
+    GROUP BY cr.network_id, n.name
+    ORDER BY revenue_usd DESC
+  `).all(month || "", month || "").map((row) => ({
+    network_name: row.network_name || "-",
+    revenue_usd: Number(row.revenue_usd || 0)
+  }));
+}
+
+function dashboardNetworkBreakdown(month = "", groupTotals = {}) {
+  const map = new Map();
+
+  function item(networkName) {
+    const key = String(networkName || "-").trim() || "-";
+    if (!map.has(key)) {
+      map.set(key, {
+        network_name: key,
+        revenue_usd: 0,
+        paid_usd: 0,
+        profit_usd: 0
+      });
+    }
+    return map.get(key);
+  }
+
+  for (const row of dashboardRevenueByNetwork(month)) {
+    item(row.network_name).revenue_usd += Number(row.revenue_usd || 0);
+  }
+
+  for (const row of groupTotals.network_paid || []) {
+    item(row.network_name).paid_usd += Number(row.paid_usd || 0);
+  }
+
+  return [...map.values()]
+    .map((row) => ({
+      ...row,
+      profit_usd: Number(row.revenue_usd || 0) - Number(row.paid_usd || 0)
+    }))
+    .sort((a, b) => b.revenue_usd - a.revenue_usd);
 }
 
 exports.getDashboard = (req, res) => {
@@ -1402,7 +1487,11 @@ exports.getDashboard = (req, res) => {
           ...channel,
           revenue_usd: Number(channel.revenue_usd || 0),
           months: Number(channel.months || 0)
-        }))
+        })),
+        network_breakdown: {
+          full: dashboardNetworkBreakdown("", fullGroupTotals),
+          month: dashboardNetworkBreakdown(month, monthGroupTotals)
+        }
       }
     });
   } catch (error) {

@@ -51,6 +51,11 @@ function generateVerificationCode() {
   return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
 }
 
+function getSystemBrandName() {
+  const setting = db.prepare("SELECT value FROM system_settings WHERE key = 'brand_name'").get();
+  return String(setting?.value || process.env.SMTP_FROM_NAME || "ANS Network").trim() || "ANS Network";
+}
+
 function hashVerificationCode(code) {
   return crypto.createHash("sha256").update(String(code || "")).digest("hex");
 }
@@ -681,8 +686,9 @@ exports.setupTwoFactor = (req, res) => {
       WHERE id = ?
     `).run(secret, req.user.id);
 
-    const issuer = encodeURIComponent("ANS Network");
-    const label = encodeURIComponent(`ANS Network:${user.email}`);
+    const brandName = getSystemBrandName();
+    const issuer = encodeURIComponent(brandName);
+    const label = encodeURIComponent(`${brandName}:${user.email}`);
     const otpauth_url = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
     const qr_url = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(otpauth_url)}`;
 
