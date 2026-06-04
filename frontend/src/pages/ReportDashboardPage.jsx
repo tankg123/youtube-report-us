@@ -26,7 +26,29 @@ function initials(value = "C") {
   return String(value || "C").trim().charAt(0).toUpperCase() || "C";
 }
 
-function StatCard({ title, value, sub, icon: Icon, tone = "blue" }) {
+function NetworkBreakdown({ items = [], metric = "revenue_usd" }) {
+  const visibleItems = (items || [])
+    .filter((item) => Math.abs(Number(item?.[metric] || 0)) > 0.0001)
+    .slice(0, 4);
+
+  if (!visibleItems.length) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {visibleItems.map((item) => (
+        <span
+          key={`${item.network_name}-${metric}`}
+          title={`${item.network_name}: ${money(item[metric])}`}
+          className="max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600"
+        >
+          {item.network_name}: {money(item[metric])}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function StatCard({ title, value, sub, icon: Icon, tone = "blue", breakdown, breakdownMetric }) {
   const tones = {
     blue: "bg-blue-600 text-white",
     emerald: "bg-emerald-600 text-white",
@@ -42,6 +64,7 @@ function StatCard({ title, value, sub, icon: Icon, tone = "blue" }) {
           <p className="text-sm font-bold text-slate-500">{title}</p>
           <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
           {sub && <p className="mt-1 text-xs font-semibold text-slate-400">{sub}</p>}
+          <NetworkBreakdown items={breakdown} metric={breakdownMetric} />
         </div>
         <div className={`h-11 w-11 rounded-2xl flex items-center justify-center ${tones[tone] || tones.blue}`}>
           <Icon size={20} />
@@ -79,6 +102,8 @@ export default function ReportDashboardPage() {
   const full = data?.full || {};
   const monthSummary = data?.month_summary || {};
   const counts = data?.counts || {};
+  const fullNetworks = data?.network_breakdown?.full || [];
+  const monthNetworks = data?.network_breakdown?.month || [];
   const profitTone = useMemo(() => Number(monthSummary.total_profit_usd || 0) >= 0 ? "emerald" : "rose", [monthSummary.total_profit_usd]);
 
   function openPartnerGroup(partner) {
@@ -113,15 +138,15 @@ export default function ReportDashboardPage() {
       ) : (
         <>
           <div className="grid md:grid-cols-3 gap-4">
-            <StatCard title="Total Revenue Full" value={money(full.total_revenue_usd)} sub="All imported revenue" icon={DollarSign} tone="slate" />
-            <StatCard title="Total Paid Full" value={money(full.total_paid_usd)} sub="Payable after fees" icon={Users} tone="blue" />
-            <StatCard title="Total Profit Full" value={money(full.total_profit_usd)} sub="Revenue minus paid" icon={TrendingUp} tone={Number(full.total_profit_usd || 0) >= 0 ? "emerald" : "rose"} />
+            <StatCard title="Total Revenue Full" value={money(full.total_revenue_usd)} sub="All imported revenue" icon={DollarSign} tone="slate" breakdown={fullNetworks} breakdownMetric="revenue_usd" />
+            <StatCard title="Total Paid Full" value={money(full.total_paid_usd)} sub="Payable after fees" icon={Users} tone="blue" breakdown={fullNetworks} breakdownMetric="paid_usd" />
+            <StatCard title="Total Profit Full" value={money(full.total_profit_usd)} sub="Revenue minus paid" icon={TrendingUp} tone={Number(full.total_profit_usd || 0) >= 0 ? "emerald" : "rose"} breakdown={fullNetworks} breakdownMetric="profit_usd" />
           </div>
 
           <div className="grid md:grid-cols-3 gap-4">
-            <StatCard title="Month Revenue" value={money(monthSummary.total_revenue_usd)} sub={month} icon={DollarSign} tone="slate" />
-            <StatCard title="Month Paid" value={money(monthSummary.total_paid_usd)} sub={`Fee: ${money(monthSummary.total_fee_usd)}`} icon={Users} tone="blue" />
-            <StatCard title="Month Profit" value={money(monthSummary.total_profit_usd)} sub="Revenue minus paid" icon={TrendingUp} tone={profitTone} />
+            <StatCard title="Month Revenue" value={money(monthSummary.total_revenue_usd)} sub={month} icon={DollarSign} tone="slate" breakdown={monthNetworks} breakdownMetric="revenue_usd" />
+            <StatCard title="Month Paid" value={money(monthSummary.total_paid_usd)} sub={`Fee: ${money(monthSummary.total_fee_usd)}`} icon={Users} tone="blue" breakdown={monthNetworks} breakdownMetric="paid_usd" />
+            <StatCard title="Month Profit" value={money(monthSummary.total_profit_usd)} sub="Revenue minus paid" icon={TrendingUp} tone={profitTone} breakdown={monthNetworks} breakdownMetric="profit_usd" />
           </div>
 
           <div className="grid md:grid-cols-4 gap-4">

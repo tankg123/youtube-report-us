@@ -1317,7 +1317,7 @@ export default function GroupChannelPage() {
                                 <div className="min-w-0">
                                   <p className="font-black text-slate-900">{channel.title || channel.channel_id}</p>
                                   <div className="flex items-center gap-2">
-                                    <p className="font-mono text-xs text-emerald-700 truncate">{channel.channel_id}</p>
+                                    <p className="font-mono text-xs text-slate-500 truncate">{channel.channel_id}</p>
                                     <button
                                       type="button"
                                       onClick={() => copyChannelId(channel.channel_id)}
@@ -1327,7 +1327,10 @@ export default function GroupChannelPage() {
                                       <Copy size={13} />
                                     </button>
                                   </div>
-                                  <p className="text-xs text-slate-500">Share: {channel.applied_share || 0}%</p>
+                                  <div className="mt-1 flex max-w-full flex-wrap items-center gap-2 text-xs text-slate-500">
+                                    <span className="inline-flex rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">Share: {channel.applied_share || 0}%</span>
+                                    <span className="max-w-[220px] truncate text-slate-500">Network: {channel.network_name || "-"}</span>
+                                  </div>
                                 </div>
                               </div>
                             </td>
