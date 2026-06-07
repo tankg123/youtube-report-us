@@ -863,7 +863,8 @@ exports.syncManagedChannelsBasic = async (req, res) => {
       message: `Synced ${synced} managed channels`,
       total: rows.length,
       synced,
-      errors
+      errors,
+      batches: Math.ceil(channelIds.length / 50)
     });
   } catch (error) {
     res.status(500).json({
@@ -1145,7 +1146,8 @@ exports.syncAllChannels = async (req, res) => {
       message: "Đã sync lại toàn bộ channel",
       total: rows.length,
       synced,
-      errors
+      errors,
+      batches: Math.ceil(channelIds.length / 50)
     });
   } catch (error) {
     res.status(500).json({
@@ -1162,27 +1164,33 @@ exports.syncAllChannelsBasic = async (req, res) => {
     let synced = 0;
     const errors = [];
 
-    for (const channel of rows) {
-      try {
-        const data = await getChannelFromYoutube(channel.channel_id, { includeLatest: false });
-        saveChannelData(data);
-        synced += 1;
-      } catch (error) {
-        errors.push({
-          id: channel.id,
-          channel_id: channel.channel_id,
-          error: error.message
-        });
+    const channelIds = rows.map((channel) => channel.channel_id).filter(Boolean);
+    const youtubeRows = await getChannelsFromYoutube(channelIds, { includeLatest: false });
+    const youtubeById = new Map(youtubeRows.map((row) => [row.channel_id, row]));
 
-        if (shouldMarkChannelError(channel, error)) {
-          db.prepare(`
-            UPDATE channels
-            SET status = ?, status_error = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `).run("error", error.message, channel.id);
-        } else {
-          db.prepare("UPDATE channels SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(channel.id);
-        }
+    for (const data of youtubeRows) {
+      saveChannelData(data);
+      synced += 1;
+    }
+
+    for (const channel of rows) {
+      if (youtubeById.has(channel.channel_id)) continue;
+
+      const error = new Error("Channel was not returned by YouTube");
+      errors.push({
+        id: channel.id,
+        channel_id: channel.channel_id,
+        error: error.message
+      });
+
+      if (shouldMarkChannelError(channel, error)) {
+        db.prepare(`
+          UPDATE channels
+          SET status = ?, status_error = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run("error", error.message, channel.id);
+      } else {
+        db.prepare("UPDATE channels SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(channel.id);
       }
     }
 
