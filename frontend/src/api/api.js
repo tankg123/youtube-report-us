@@ -31,6 +31,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
+      localStorage.removeItem("token_expires_at");
 
       if (!window.location.pathname.includes("/login")) {
         window.location.href = "/login";

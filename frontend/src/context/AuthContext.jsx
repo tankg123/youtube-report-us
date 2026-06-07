@@ -59,6 +59,23 @@ function loadSavedUser() {
   }
 }
 
+function getTokenExpiryMs(authToken) {
+  try {
+    const payload = authToken.split(".")[1];
+    if (!payload) return 0;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(window.atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")));
+    return Number(decoded.exp || 0) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+function isTokenExpired(authToken) {
+  const expiresAt = getTokenExpiryMs(authToken);
+  return Boolean(authToken && expiresAt && Date.now() >= expiresAt);
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     return loadSavedUser();
@@ -73,12 +90,14 @@ export function AuthProvider({ children }) {
   function saveAuth(authToken, authUser) {
     localStorage.setItem("token", authToken);
     localStorage.setItem("user", JSON.stringify(authUser));
+    localStorage.setItem("token_expires_at", String(getTokenExpiryMs(authToken) || ""));
     setToken(authToken);
     setUser(authUser);
   }
 
   function updateSavedUser(authUser, authToken = token) {
     if (authToken) localStorage.setItem("token", authToken);
+    if (authToken) localStorage.setItem("token_expires_at", String(getTokenExpiryMs(authToken) || ""));
     localStorage.setItem("user", JSON.stringify(authUser));
     if (authToken) setToken(authToken);
     setUser(authUser);
@@ -87,6 +106,7 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("token_expires_at");
     setToken("");
     setUser(null);
   }
@@ -100,6 +120,12 @@ export function AuthProvider({ children }) {
         return;
       }
 
+      if (isTokenExpired(savedToken)) {
+        logout();
+        setAuthLoading(false);
+        return;
+      }
+
       const res = await axios.get(`${API_URL}/auth/me`, {
         headers: {
           Authorization: `Bearer ${savedToken}`,
@@ -108,6 +134,7 @@ export function AuthProvider({ children }) {
       });
 
       localStorage.setItem("user", JSON.stringify(res.data.user));
+      localStorage.setItem("token_expires_at", String(getTokenExpiryMs(savedToken) || ""));
       setUser(res.data.user);
       setToken(savedToken);
     } catch {
@@ -120,6 +147,28 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const expiresAt = getTokenExpiryMs(token);
+    if (!expiresAt) return undefined;
+
+    const delay = expiresAt - Date.now();
+    if (delay <= 0) {
+      logout();
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      logout();
+      if (!window.location.pathname.includes("/login")) {
+        window.location.href = "/login";
+      }
+    }, delay);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [token]);
 
   return (
     (() => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Download, Edit3, Filter, Grid2X2, List, Loader2, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, Unlink, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, Edit3, Filter, Grid2X2, List, Loader2, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, Unlink, X } from "lucide-react";
 import api from "../api/api";
 import PaginationFooter from "../components/PaginationFooter";
 
@@ -902,7 +902,7 @@ export default function ChannelManagementPage() {
                 <SelectBox label="Network" value={bulkForm.network_id} onChange={(v) => setBulkForm({ ...bulkForm, network_id: v })} options={networks.map((n) => ({ value: n.id, label: n.name }))} fallback="All networks" />
                 <SelectBox label="Collaborator" value={bulkForm.collaborator_id} onChange={(v) => setBulkForm({ ...bulkForm, collaborator_id: v })} options={collaborators.map((c) => ({ value: c.id, label: c.display_name || c.name }))} fallback="No collaborator" />
                 <SelectBox label="Colab Revenue Sharing" value={bulkForm.colab_sharing_id} onChange={(v) => setBulkForm({ ...bulkForm, colab_sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: sharingOptionLabel(s) }))} fallback="No colab revenue sharing" />
-                <SelectBox label="Partner" value={bulkForm.partner_id} onChange={(v) => setBulkForm({ ...bulkForm, partner_id: v })} options={partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))} fallback="All partners" />
+                <SelectBox searchable label="Partner" value={bulkForm.partner_id} onChange={(v) => setBulkForm({ ...bulkForm, partner_id: v })} options={partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))} fallback="All partners" searchPlaceholder="Search partner..." />
                 <SelectBox label="Revenue Sharing" value={bulkForm.sharing_id} onChange={(v) => setBulkForm({ ...bulkForm, sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: sharingOptionLabel(s) }))} fallback="All revenue sharings" />
               </div>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -1020,7 +1020,7 @@ export default function ChannelManagementPage() {
                   <span className="font-black text-slate-700 mb-2 block">Custom URL</span>
                   <input value={editForm.custom_url} onChange={(event) => setEditForm({ ...editForm, custom_url: event.target.value })} className="w-full rounded-2xl border border-slate-300 px-4 py-4 outline-none focus:border-blue-500" />
                 </label>
-                <SelectBox label="Partner" value={editForm.partner_id} onChange={(v) => setEditForm({ ...editForm, partner_id: v })} options={partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))} fallback="No partner" />
+                <SelectBox searchable label="Partner" value={editForm.partner_id} onChange={(v) => setEditForm({ ...editForm, partner_id: v })} options={partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))} fallback="No partner" searchPlaceholder="Search partner..." />
                 <SelectBox label="Network" value={editForm.network_id} onChange={(v) => setEditForm({ ...editForm, network_id: v })} options={networks.map((n) => ({ value: n.id, label: n.name }))} fallback="No network" />
                 <SelectBox label="Collaborator" value={editForm.collaborator_id} onChange={(v) => setEditForm({ ...editForm, collaborator_id: v })} options={collaborators.map((c) => ({ value: c.id, label: c.display_name || c.name }))} fallback="No collaborator" />
                 <SelectBox label="Collaborator sharing" value={editForm.colab_sharing_id} onChange={(v) => setEditForm({ ...editForm, colab_sharing_id: v })} options={sharings.map((s) => ({ value: s.id, label: `${s.name}` }))} fallback="No collaborator sharing" />
@@ -1059,12 +1059,14 @@ export default function ChannelManagementPage() {
             <div className="p-6 space-y-5">
               <div className="grid lg:grid-cols-2 gap-4">
                 <SelectBox
+                  searchable
                   label="Partner"
                   value={bulkEditForm.partner_id}
                   onChange={(v) => setBulkEditForm({ ...bulkEditForm, partner_id: v })}
                   options={[{ value: "__clear", label: "Clear partner" }, ...partners.map((p) => ({ value: p.id, label: p.display_name || p.partner_name }))]}
                   fallback="Keep current"
                   emptyValue="__keep"
+                  searchPlaceholder="Search partner..."
                 />
                 <SelectBox
                   label="Network"
@@ -1144,7 +1146,88 @@ export default function ChannelManagementPage() {
   );
 }
 
-function SelectBox({ label, value, onChange, options, fallback, emptyValue = "" }) {
+function SelectBox({ label, value, onChange, options, fallback, emptyValue = "", searchable = false, searchPlaceholder = "Search..." }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const filteredOptions = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    const selectedOption = options.find((option) => String(option.value) === String(value));
+    const matchedOptions = !searchable || !keyword
+      ? options
+      : options.filter((option) => String(option.label || "").toLowerCase().includes(keyword));
+    if (selectedOption && !matchedOptions.some((option) => String(option.value) === String(selectedOption.value))) {
+      return [selectedOption, ...matchedOptions];
+    }
+    return matchedOptions;
+  }, [options, query, searchable, value]);
+  const selectedOption = options.find((option) => String(option.value) === String(value));
+
+  if (searchable) {
+    return (
+      <div
+        className="relative"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+        }}
+      >
+        <span className="font-black text-slate-700 mb-2 block">{label}</span>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          className="flex w-full items-center justify-between rounded-2xl border border-slate-300 bg-white px-4 py-4 text-left text-slate-900"
+        >
+          <span className={selectedOption ? "truncate" : "truncate text-slate-500"}>{selectedOption?.label || fallback}</span>
+          <ChevronDown size={18} className="shrink-0 text-slate-500" />
+        </button>
+        {open && (
+          <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="relative border-b border-slate-100 p-2">
+              <Search size={15} className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto py-1">
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(emptyValue);
+                  setQuery("");
+                  setOpen(false);
+                }}
+                className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                {fallback}
+              </button>
+              {filteredOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange(option.value);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  className={`block w-full px-4 py-2 text-left text-sm hover:bg-blue-50 ${String(option.value) === String(value) ? "font-black text-blue-600" : "font-semibold text-slate-800"}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+              {!filteredOptions.length && <div className="px-4 py-3 text-sm text-slate-500">No partner found.</div>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <label>
       <span className="font-black text-slate-700 mb-2 block">{label}</span>

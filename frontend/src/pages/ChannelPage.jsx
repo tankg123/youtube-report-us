@@ -239,7 +239,7 @@ export default function ChannelPage() {
     try {
       setSyncingAll(true);
       setMessage("Đang sync toàn bộ channel từ YouTube...");
-      const res = await api.post("/channels/sync-all");
+      const res = await api.post("/channels/sync-all", {}, { timeout: 300000 });
       const errors = res.data.errors?.length || 0;
       setMessage(`${res.data.message || "Đã sync toàn bộ channel"}: ${res.data.synced || 0}/${res.data.total || 0} channel${errors ? `, ${errors} lỗi` : ""}`);
       await fetchChannels(keyword);
@@ -260,9 +260,9 @@ export default function ChannelPage() {
     try {
       setSyncingBasic(true);
       setMessage("Syncing channel stats without latest videos...");
-      const res = await api.post("/channels/sync-basic");
+      const res = await api.post("/channels/sync-basic", {}, { timeout: 300000 });
       const errors = res.data.errors?.length || 0;
-      setMessage(`${res.data.message || "Synced channel stats"}: ${res.data.synced || 0}/${res.data.total || 0} channel${errors ? `, ${errors} errors` : ""}`);
+      setMessage(`${res.data.message || "Synced channel stats"}: ${res.data.synced || 0}/${res.data.total || 0} channel${res.data.batches ? `, ${res.data.batches} batches` : ""}${errors ? `, ${errors} errors` : ""}`);
       await fetchChannels(keyword);
       await fetchStats();
     } catch (error) {

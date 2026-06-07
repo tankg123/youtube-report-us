@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Activity, AlertTriangle, DollarSign, Layers3, Loader2, TrendingUp, UsersRound, Video } from "lucide-react";
 import api from "../api/api";
@@ -89,7 +89,6 @@ export default function PartnerReportDashboardPage() {
   const monthly = data?.monthly || {};
   const full = data?.full || {};
   const counts = data?.counts || {};
-  const profit = useMemo(() => Number(monthly.total_revenue_usd || 0) - Number(monthly.total_payable_usd || 0), [monthly]);
 
   function openGroup(group) {
     if (!group?.group_id) return;
@@ -135,10 +134,9 @@ export default function PartnerReportDashboardPage() {
             <StatCard title="Total Payable Full" value={money(full.total_payable_usd)} sub="After group fee" icon={TrendingUp} tone="emerald" />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <StatCard title="Month Revenue" value={money(monthly.total_revenue_usd)} sub={monthLabel(month)} icon={DollarSign} tone="slate" />
             <StatCard title="Month Paid" value={money(monthly.total_paid_usd)} sub={`Fee: ${money(monthly.total_fee_usd)}`} icon={UsersRound} tone="blue" />
-            <StatCard title="Month Profit" value={money(profit)} sub="Revenue minus payable" icon={TrendingUp} tone={profit >= 0 ? "emerald" : "rose"} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">

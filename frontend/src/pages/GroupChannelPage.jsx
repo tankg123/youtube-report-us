@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowUpDown, Calendar, Check, Copy, Download, Edit3, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Trash2, Users, X } from "lucide-react";
+import { ArrowUpDown, Calendar, Check, ChevronDown, Copy, Download, Edit3, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Trash2, Users, X } from "lucide-react";
 import api from "../api/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -568,22 +568,98 @@ function exportGroupPdf(group, company = fallbackCompany) {
 }
 
 function GroupForm({ partners, value, onChange }) {
+  const [partnerSearch, setPartnerSearch] = useState("");
+  const [partnerSelectOpen, setPartnerSelectOpen] = useState(false);
   const sortedPartners = useMemo(() => [...(partners || [])].sort((left, right) =>
     String(left.display_name || left.partner_name || "").localeCompare(String(right.display_name || right.partner_name || ""), "vi", { sensitivity: "base" })
   ), [partners]);
+  const filteredPartners = useMemo(() => {
+    const keyword = partnerSearch.trim().toLowerCase();
+    const selectedPartner = sortedPartners.find((partner) => String(partner.id) === String(value.partner_id));
+    const matchedPartners = !keyword
+      ? sortedPartners
+      : sortedPartners.filter((partner) =>
+          String(partner.display_name || partner.partner_name || "").toLowerCase().includes(keyword)
+          || String(partner.partner_name || "").toLowerCase().includes(keyword)
+          || String(partner.email || "").toLowerCase().includes(keyword)
+        );
+    if (selectedPartner && !matchedPartners.some((partner) => String(partner.id) === String(selectedPartner.id))) {
+      return [selectedPartner, ...matchedPartners];
+    }
+    return matchedPartners;
+  }, [partnerSearch, sortedPartners, value.partner_id]);
+  const selectedPartner = sortedPartners.find((partner) => String(partner.id) === String(value.partner_id));
 
   return (
     <div className="space-y-5">
       <div className="grid md:grid-cols-2 gap-4">
-        <label>
+        <div
+          className="relative"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setPartnerSelectOpen(false);
+          }}
+        >
           <span className="text-xs font-black uppercase text-slate-400 mb-2 block">Partner</span>
-          <select value={value.partner_id} onChange={(e) => onChange({ ...value, partner_id: e.target.value })} className="w-full rounded-2xl border border-slate-300 px-4 py-3 bg-white">
+          <button
+            type="button"
+            onClick={() => setPartnerSelectOpen((current) => !current)}
+            className="flex w-full items-center justify-between rounded-2xl border border-slate-300 bg-white px-4 py-3 text-left text-slate-900"
+          >
+            <span className={selectedPartner ? "truncate" : "truncate text-slate-500"}>{selectedPartner ? selectedPartner.display_name || selectedPartner.partner_name : "Select partner"}</span>
+            <ChevronDown size={18} className="shrink-0 text-slate-500" />
+          </button>
+          {partnerSelectOpen && (
+            <div className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="relative border-b border-slate-100 p-2">
+                <Search size={15} className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  autoFocus
+                  type="search"
+                  value={partnerSearch}
+                  onChange={(event) => setPartnerSearch(event.target.value)}
+                  placeholder="Search partner..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                />
+              </div>
+              <div className="max-h-72 overflow-y-auto py-1">
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange({ ...value, partner_id: "" });
+                    setPartnerSearch("");
+                    setPartnerSelectOpen(false);
+                  }}
+                  className="block w-full px-4 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Select partner
+                </button>
+                {filteredPartners.map((partner) => (
+                  <button
+                    key={partner.id}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      onChange({ ...value, partner_id: partner.id });
+                      setPartnerSearch("");
+                      setPartnerSelectOpen(false);
+                    }}
+                    className={`block w-full px-4 py-2 text-left text-sm hover:bg-blue-50 ${String(partner.id) === String(value.partner_id) ? "font-black text-blue-600" : "font-semibold text-slate-800"}`}
+                  >
+                    {partner.display_name || partner.partner_name}
+                  </button>
+                ))}
+                {!filteredPartners.length && <div className="px-4 py-3 text-sm text-slate-500">No partner found.</div>}
+              </div>
+            </div>
+          )}
+          <select value={value.partner_id} onChange={(e) => onChange({ ...value, partner_id: e.target.value })} className="hidden">
             <option value="">Chọn partner</option>
-            {sortedPartners.map((partner) => (
+            {filteredPartners.map((partner) => (
               <option key={partner.id} value={partner.id}>{partner.display_name || partner.partner_name}</option>
             ))}
           </select>
-        </label>
+        </div>
         <label>
           <span className="text-xs font-black uppercase text-slate-400 mb-2 block">Tên group</span>
           <input value={value.group_name} onChange={(e) => onChange({ ...value, group_name: e.target.value })} className="w-full rounded-2xl border border-slate-300 px-4 py-3" placeholder="Tên hiển thị group" />
