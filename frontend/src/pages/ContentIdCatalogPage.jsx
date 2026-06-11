@@ -67,8 +67,11 @@ export default function ContentIdCatalogPage({ type }) {
       const res = await api.post("/content-id/labels/sync-cms");
       const created = res.data.created || 0;
       const updated = res.data.updated || 0;
-      const failed = (res.data.cmsResults || []).filter((item) => !item.ok).length;
-      setMessage(`CMS labels synced. Created ${created}, updated ${updated}${failed ? `, ${failed} CMS failed` : ""}.`);
+      const failedItems = (res.data.cmsResults || []).filter((item) => !item.ok);
+      const failedMessage = failedItems.length
+        ? `. Failed: ${failedItems.map((item) => `${item.cmsName}: ${item.message || "Unknown error"}`).join("; ")}`
+        : ".";
+      setMessage(`CMS labels synced. Created ${created}, updated ${updated}${failedMessage}`);
       await loadItems();
     } catch (error) {
       setMessage(error.response?.data?.message || "Could not sync CMS labels.");

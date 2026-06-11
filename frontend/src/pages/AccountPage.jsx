@@ -14,7 +14,8 @@ import {
   X,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  Search
 } from "lucide-react";
 import api from "../api/api";
 import { useAuth } from "../context/AuthContext";
@@ -38,6 +39,85 @@ function roleList(item) {
 
 function hasRole(item, role) {
   return roleList(item).some((value) => String(value).toLowerCase() === String(role).toLowerCase());
+}
+
+function SearchableAddSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  searchPlaceholder,
+  getValue,
+  getLabel
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = options.find((option) => String(getValue(option)) === String(value || ""));
+  const filtered = options.filter((option) => getLabel(option).toLowerCase().includes(query.trim().toLowerCase()));
+
+  function choose(option) {
+    onChange(String(getValue(option)));
+    setOpen(false);
+    setQuery("");
+  }
+
+  return (
+    <div className="relative min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-bold text-slate-700"
+      >
+        <span className={selected ? "truncate" : "truncate text-slate-400"}>
+          {selected ? getLabel(selected) : placeholder}
+        </span>
+        <span className="text-slate-400">v</span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[min(360px,80vw)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="p-2">
+            <label className="flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-500 focus-within:border-blue-500">
+              <Search size={16} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                autoFocus
+                placeholder={searchPlaceholder}
+                className="w-full bg-transparent outline-none"
+              />
+            </label>
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+                setQuery("");
+              }}
+              className="block w-full px-4 py-2 text-left text-sm font-bold text-slate-500 hover:bg-slate-50"
+            >
+              {placeholder}
+            </button>
+            {filtered.map((option) => (
+              <button
+                key={getValue(option)}
+                type="button"
+                onClick={() => choose(option)}
+                className="block w-full px-4 py-2 text-left text-sm font-bold text-slate-800 hover:bg-blue-50"
+              >
+                {getLabel(option)}
+              </button>
+            ))}
+            {!filtered.length && (
+              <p className="px-4 py-3 text-sm font-bold text-slate-400">No results found</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AccountPage() {
@@ -439,20 +519,17 @@ export default function AccountPage() {
                             {!(item.assigned_groups || []).length && <span className="text-xs text-slate-400">No groups assigned</span>}
                           </div>
                           <div className="flex gap-2">
-                            <select
+                            <SearchableAddSelect
                               value={pendingGroup[item.id] || ""}
-                              onChange={(event) => setPendingGroup((current) => ({ ...current, [item.id]: event.target.value }))}
-                              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold"
-                            >
-                              <option value="">Add partner group</option>
-                              {groups
+                              onChange={(nextValue) => setPendingGroup((current) => ({ ...current, [item.id]: nextValue }))}
+                              placeholder="Add partner group"
+                              searchPlaceholder="Search partner group..."
+                              options={groups
                                 .filter((group) => !(item.assigned_groups || []).some((assigned) => Number(assigned.id) === Number(group.id)))
-                                .map((group) => (
-                                  <option key={group.id} value={group.id}>
-                                    {group.group_name} - {group.partner_name}
-                                  </option>
-                                ))}
-                            </select>
+                                .sort((a, b) => `${a.group_name || ""} ${a.partner_name || ""}`.localeCompare(`${b.group_name || ""} ${b.partner_name || ""}`, undefined, { sensitivity: "base" }))}
+                              getValue={(group) => group.id}
+                              getLabel={(group) => `${group.group_name} - ${group.partner_name}`}
+                            />
                             <button
                               type="button"
                               onClick={() => addPartnerGroup(item)}
@@ -482,20 +559,17 @@ export default function AccountPage() {
                             {!(item.assigned_labels || []).length && <span className="text-xs text-slate-400">No labels assigned</span>}
                           </div>
                           <div className="flex gap-2">
-                            <select
+                            <SearchableAddSelect
                               value={pendingLabel[item.id] || ""}
-                              onChange={(event) => setPendingLabel((current) => ({ ...current, [item.id]: event.target.value }))}
-                              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold"
-                            >
-                              <option value="">Add claim label</option>
-                              {labels
+                              onChange={(nextValue) => setPendingLabel((current) => ({ ...current, [item.id]: nextValue }))}
+                              placeholder="Add claim label"
+                              searchPlaceholder="Search claim label..."
+                              options={labels
                                 .filter((label) => !(item.assigned_labels || []).some((assigned) => Number(assigned.id) === Number(label.id)))
-                                .map((label) => (
-                                  <option key={label.id} value={label.id}>
-                                    {label.display_name || label.name}
-                                  </option>
-                                ))}
-                            </select>
+                                .sort((a, b) => String(a.display_name || a.name || "").localeCompare(String(b.display_name || b.name || ""), undefined, { sensitivity: "base" }))}
+                              getValue={(label) => label.id}
+                              getLabel={(label) => label.display_name || label.name}
+                            />
                             <button
                               type="button"
                               onClick={() => addClaimLabel(item)}

@@ -46,7 +46,7 @@ export default function Sidebar() {
   const logoColor = useMemo(() => logoColors[Math.floor(Math.random() * logoColors.length)], []);
   const channelPaths = ["/channel-management", "/channel-management/collaborators", "/channel-management/sharing"];
   const reportPaths = ["/report-dashboard", "/partner-dashboard", "/reports", "/export-multi", "/channels", "/exchange-rates", "/companies", "/groups"];
-  const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/claims", "/content-id/labels", "/content-id/artists"];
+  const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/claims", "/content-id/whitelists", "/content-id/labels", "/content-id/artists"];
   const expensePaths = ["/expenses/overview", "/expenses/categories", "/expenses/transactions", "/expenses/accounts", "/expenses/revenue"];
   const partnerPaths = ["/partners", "/partners/overview", "/partners/list", "/partners/contracts"];
   const emailPaths = ["/email/notification"];
@@ -100,6 +100,7 @@ export default function Sidebar() {
     { name: "Web Asset Reference", path: "/content-id/web-assets", icon: FileVideo, show: canViewContentIdFull },
     { name: "Product Manager", path: "/content-id/products", icon: PackageSearch, show: canViewContentIdFull },
     { name: "Claim Manager", path: "/content-id/claims", icon: ShieldCheck, show: canViewContentIdClaim },
+    { name: "Whitelist", path: "/content-id/whitelists", icon: ShieldCheck, show: canViewContentIdFull },
     { name: "Label", path: "/content-id/labels", icon: Tags, show: canViewContentIdClaim },
     { name: "Artist", path: "/content-id/artists", icon: UserRound, show: canViewContentIdFull }
   ].filter((item) => item.show);

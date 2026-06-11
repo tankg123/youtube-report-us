@@ -41,6 +41,7 @@ import ContentIdSettingsPage from "./pages/ContentIdSettingsPage";
 import ContentIdCatalogPage from "./pages/ContentIdCatalogPage";
 import ContentIdWebAssetPage from "./pages/ContentIdWebAssetPage";
 import ContentIdClaimPage from "./pages/ContentIdClaimPage";
+import ContentIdWhitelistPage from "./pages/ContentIdWhitelistPage";
 import { ExpenseAccountsPage, ExpenseCategoriesPage, ExpenseOverviewPage, ExpenseRevenuePage, ExpenseTransactionsPage } from "./pages/ExpensePages";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { I18nProvider, useI18n } from "./context/I18nContext";
@@ -132,7 +133,7 @@ function MobileNav() {
   const { t } = useI18n();
   const channelPaths = ["/channel-management", "/channel-management/collaborators", "/channel-management/sharing"];
   const reportPaths = ["/report-dashboard", "/partner-dashboard", "/reports", "/export-multi", "/channels", "/exchange-rates", "/companies", "/groups"];
-  const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/claims", "/content-id/labels", "/content-id/artists"];
+  const contentIdPaths = ["/content-id/creator", "/content-id/web-assets", "/content-id/products", "/content-id/claims", "/content-id/whitelists", "/content-id/labels", "/content-id/artists"];
   const expensePaths = ["/expenses/overview", "/expenses/categories", "/expenses/transactions", "/expenses/accounts", "/expenses/revenue"];
   const partnerPaths = ["/partners", "/partners/overview", "/partners/list", "/partners/contracts"];
   const emailPaths = ["/email/notification"];
@@ -206,6 +207,7 @@ function MobileNav() {
     { name: "Web Asset Reference", path: "/content-id/web-assets", icon: FileVideo, show: canViewContentIdFull },
     { name: "Product Manager", path: "/content-id/products", icon: PackageSearch, show: canViewContentIdFull },
     { name: "Claim Manager", path: "/content-id/claims", icon: ShieldCheck, show: canViewContentIdClaim },
+    { name: "Whitelist", path: "/content-id/whitelists", icon: ShieldCheck, show: canViewContentIdFull },
     { name: "Label", path: "/content-id/labels", icon: Tags, show: canViewContentIdClaim },
     { name: "Artist", path: "/content-id/artists", icon: UserRound, show: canViewContentIdFull }
   ].filter((item) => item.show);
@@ -733,6 +735,10 @@ function PrivateLayout() {
           <Route
             path="/content-id/claims"
             element={canViewContentIdClaim ? <ContentIdClaimPage /> : <Navigate to={defaultPath} replace />}
+          />
+          <Route
+            path="/content-id/whitelists"
+            element={canViewContentIdFull ? <ContentIdWhitelistPage /> : <Navigate to={defaultPath} replace />}
           />
           <Route
             path="/content-id/labels"
