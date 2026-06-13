@@ -38,7 +38,7 @@ const { authMiddleware, allowRoles } = require("../middlewares/authMiddleware");
 const router = express.Router();
 const CONTENT_ID_ROLES = ["admin", "Content ID"];
 const CLAIM_MANAGER_ROLES = ["admin", "Content ID", "Claim Manager"];
-const LABEL_READ_ROLES = ["admin", "Content ID", "Claim Manager", "Account"];
+const LABEL_READ_ROLES = ["admin", "Content ID", "Claim Manager", "Account", "Account Claim Manager"];
 const LABEL_WRITE_ROLES = ["admin", "Content ID"];
 
 router.use(authMiddleware);

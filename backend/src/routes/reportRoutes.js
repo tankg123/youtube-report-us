@@ -37,6 +37,7 @@ router.put("/companies/:id", allowRoles(...REPORT_ROLES), reportController.updat
 router.delete("/companies/:id", allowRoles(...REPORT_ROLES), reportController.deleteCompany);
 
 router.get("/partners", allowRoles(...PARTNER_ROLES), reportController.getPartners);
+router.get("/partners/export-template", allowRoles(...PARTNER_ROLES), reportController.exportPartnerTemplate);
 router.post("/partners/import", allowRoles(...PARTNER_ROLES), reportController.importPartners);
 router.post("/partners/request", allowRoles(...PARTNER_ROLES), reportController.createPartnerRequest);
 router.post("/partners/:id/approve", allowRoles(...PARTNER_ROLES), reportController.approvePartnerRequest);

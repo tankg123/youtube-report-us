@@ -2075,10 +2075,14 @@ exports.getPartners = (req, res) => {
 };
 
 const PARTNER_IMPORT_HEADERS = {
+  id: "id",
+  partner_id: "id",
   partner_display_name: "display_name",
   display_name: "display_name",
+  display: "display_name",
   name: "partner_name",
   partner_name: "partner_name",
+  partner: "partner_name",
   email: "email",
   full_name: "contact_name",
   contact_name: "contact_name",
@@ -2098,7 +2102,11 @@ const PARTNER_IMPORT_HEADERS = {
   account_holder: "bank_holder",
   swift_code: "swift_code",
   bank_branch: "bank_branch",
+  partner_status: "partner_status",
+  request_token: "request_token",
+  request_submitted_at: "request_submitted_at",
   note: "internal_notes",
+  notes: "internal_notes",
   internal_notes: "internal_notes",
   contract_status: "contract_status",
   contract_notes: "contract_notes",
@@ -2111,6 +2119,25 @@ const PARTNER_IMPORT_HEADERS = {
   created_at: "created_at",
   updated_at: "updated_at"
 };
+
+const PARTNER_TEMPLATE_COLUMNS = [
+  { key: "id", header: "ID" },
+  { key: "partner_name", header: "Partner Name" },
+  { key: "display_name", header: "Display Name" },
+  { key: "email", header: "Email" },
+  { key: "contact_name", header: "Full Name" },
+  { key: "phone", header: "Phone" },
+  { key: "counter_email", header: "Counter Email" },
+  { key: "address", header: "Address" },
+  { key: "payment_method", header: "Payment Method" },
+  { key: "pingpongx", header: "PingPongX" },
+  { key: "bank_name", header: "Bank Name" },
+  { key: "bank_holder", header: "Bank Holder" },
+  { key: "account_number", header: "Account Number" },
+  { key: "swift_code", header: "SWIFT Code" },
+  { key: "bank_branch", header: "Bank Branch" },
+  { key: "partner_status", header: "Partner Status" }
+];
 
 const PARTNER_CONTRACT_STATUSES = ["incomplete_info", "not_created", "sent_waiting", "done", "renewal_needed"];
 const PARTNER_STATUSES = ["request_sent", "request_done", "active"];
@@ -2165,6 +2192,7 @@ function normalizePartnerImportRow(raw) {
     partner[mapped] = String(value || "").trim();
   });
 
+  partner.id = Number(partner.id) || null;
   partner.partner_name = partner.partner_name || partner.display_name || partner.email || "";
   partner.display_name = partner.display_name || "";
   partner.email = partner.email || "";
@@ -2172,15 +2200,16 @@ function normalizePartnerImportRow(raw) {
   partner.phone = partner.phone || "";
   partner.counter_email = partner.counter_email || "";
   partner.address = partner.address || "";
-  partner.payment_method = ["pingpongx", "bank"].includes(String(partner.payment_method || "").toLowerCase())
-    ? String(partner.payment_method).toLowerCase()
-    : "pingpongx";
   partner.pingpongx = partner.pingpongx || "";
+  partner.payment_method = partner.pingpongx ? "pingpongx" : "bank";
   partner.bank_name = partner.bank_name || "";
   partner.bank_holder = partner.bank_holder || "";
   partner.account_number = partner.account_number || "";
   partner.swift_code = partner.swift_code || "";
   partner.bank_branch = partner.bank_branch || "";
+  partner.partner_status = PARTNER_STATUSES.includes(partner.partner_status) ? partner.partner_status : "active";
+  partner.request_token = partner.request_token || null;
+  partner.request_submitted_at = toSqlDate(partner.request_submitted_at);
   partner.internal_notes = partner.internal_notes || "";
   partner.contract_status = PARTNER_CONTRACT_STATUSES.includes(partner.contract_status) ? partner.contract_status : "not_created";
   partner.contract_notes = partner.contract_notes || "";
@@ -2194,6 +2223,79 @@ function normalizePartnerImportRow(raw) {
   partner.updated_at = toSqlDate(partner.updated_at);
   return partner;
 }
+
+function formatPartnerTemplateValue(row, key) {
+  const value = row?.[key];
+  if (value == null) return "";
+  return value;
+}
+
+exports.exportPartnerTemplate = async (req, res) => {
+  try {
+    syncExpiredPartnerContracts();
+    const selectedIds = String(req.query.ids || "")
+      .split(",")
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "ANS Network";
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet("Partners", {
+      views: [{ state: "frozen", ySplit: 1 }]
+    });
+    worksheet.columns = PARTNER_TEMPLATE_COLUMNS.map((column) => ({
+      header: column.header,
+      key: column.key,
+      width: Math.max(16, column.header.length + 4)
+    }));
+
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F766E" } };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 24;
+
+    const partners = selectedIds.length
+      ? db.prepare(`
+          SELECT * FROM partners
+          WHERE id IN (${selectedIds.map(() => "?").join(",")})
+          ORDER BY partner_name COLLATE NOCASE, id ASC
+        `).all(...selectedIds)
+      : db.prepare("SELECT * FROM partners ORDER BY partner_name COLLATE NOCASE, id ASC").all();
+    partners.forEach((partner) => {
+      const data = {};
+      PARTNER_TEMPLATE_COLUMNS.forEach((column) => {
+        data[column.key] = formatPartnerTemplateValue(partner, column.key);
+      });
+      data.payment_method = partner.pingpongx ? "pingpongx" : "bank";
+      worksheet.addRow(data);
+    });
+
+    worksheet.eachRow((row, rowNumber) => {
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFD9E2EC" } },
+          left: { style: "thin", color: { argb: "FFD9E2EC" } },
+          bottom: { style: "thin", color: { argb: "FFD9E2EC" } },
+          right: { style: "thin", color: { argb: "FFD9E2EC" } }
+        };
+        if (rowNumber > 1) {
+          cell.alignment = { vertical: "top", wrapText: true };
+        }
+      });
+    });
+
+    worksheet.getColumn("address").width = 36;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", "attachment; filename=\"partner-import-template.xlsx\"");
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not export partner template", error: error.message });
+  }
+};
 
 function validatePartnerContractPayload(status, data) {
   if (status !== "done") return null;
@@ -2393,12 +2495,12 @@ exports.importPartners = async (req, res) => {
       INSERT INTO partners (
         partner_name, display_name, email, contact_name, phone, counter_email,
         address, payment_method, pingpongx, bank_name, bank_holder, account_number,
-        swift_code, bank_branch, contract_status,
+        swift_code, bank_branch, partner_status, request_token, request_submitted_at, contract_status,
         contract_notes, contract_sent_at, contract_signed_at, contract_start_at,
         contract_end_at, contract_file_name, contract_file_data_url, internal_notes,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
     `);
 
     const updateStmt = db.prepare(`
@@ -2406,12 +2508,14 @@ exports.importPartners = async (req, res) => {
         partner_name = ?, display_name = ?, email = ?, contact_name = ?, phone = ?,
         counter_email = ?, address = ?, payment_method = ?, pingpongx = ?, bank_name = ?,
         bank_holder = ?, account_number = ?, swift_code = ?, bank_branch = ?,
+        partner_status = ?, request_token = ?, request_submitted_at = ?,
         contract_status = ?, contract_notes = ?, contract_sent_at = ?,
         contract_signed_at = ?, contract_start_at = ?, contract_end_at = ?, contract_file_name = ?,
         contract_file_data_url = ?, internal_notes = ?, updated_at = COALESCE(?, CURRENT_TIMESTAMP)
       WHERE id = ?
     `);
 
+    const findById = db.prepare("SELECT * FROM partners WHERE id = ? LIMIT 1");
     const findByEmail = db.prepare("SELECT * FROM partners WHERE lower(email) = lower(?) LIMIT 1");
     const findByName = db.prepare("SELECT * FROM partners WHERE lower(partner_name) = lower(?) LIMIT 1");
     const summary = { file_name: fileName, created: 0, updated: 0, skipped: 0, errors: [] };
@@ -2431,7 +2535,9 @@ exports.importPartners = async (req, res) => {
           continue;
         }
 
-        const existing = partner.email ? findByEmail.get(partner.email) : findByName.get(partner.partner_name);
+        const existing = (partner.id ? findById.get(partner.id) : null)
+          || (partner.email ? findByEmail.get(partner.email) : null)
+          || findByName.get(partner.partner_name);
         if (existing) {
           updateStmt.run(
             partner.partner_name,
@@ -2448,6 +2554,9 @@ exports.importPartners = async (req, res) => {
             partner.account_number,
             partner.swift_code,
             partner.bank_branch,
+            partner.partner_status,
+            partner.request_token,
+            partner.request_submitted_at,
             partner.contract_status,
             partner.contract_notes,
             partner.contract_sent_at,
@@ -2479,6 +2588,9 @@ exports.importPartners = async (req, res) => {
           partner.account_number,
           partner.swift_code,
           partner.bank_branch,
+          partner.partner_status,
+          partner.request_token,
+          partner.request_submitted_at,
           partner.contract_status,
           partner.contract_notes,
           partner.contract_sent_at,

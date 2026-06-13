@@ -9,6 +9,7 @@ const ROLE_OPTIONS = ["admin", "Account", "Account Claim Manager", "Report Manag
 const ROLE_LOOKUP = new Map(ROLE_OPTIONS.map((role) => [role.toLowerCase(), role]));
 ROLE_LOOKUP.set("readonly", "Read Only");
 ROLE_LOOKUP.set("read online", "Read Only");
+const SUPER_ADMIN_ROLES = new Set(["supper admin", "super admin"]);
 
 function normalizeRoleName(role) {
   const clean = String(role || "").trim();
@@ -35,16 +36,34 @@ function userHasRole(user, role) {
   return parseRoles(user?.role).some((item) => item.toLowerCase() === target);
 }
 
+function rawUserRoles(user) {
+  return parseRoles(user?.roles?.length ? user.roles : user?.role)
+    .map((role) => String(role || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isSuperAdminUser(user) {
+  return rawUserRoles(user).some((role) => SUPER_ADMIN_ROLES.has(role));
+}
+
+function rejectProtectedSuperAdmin(res) {
+  return res.status(403).json({
+    success: false,
+    message: "Super admin account is protected"
+  });
+}
+
 function isAdminUser(user) {
-  return userHasRole(user, "admin");
+  return userHasRole(user, "admin") || isSuperAdminUser(user);
 }
 
 function isAdminActor(user) {
-  return parseRoles(user?.roles?.length ? user.roles : user?.role).some((role) => String(role).toLowerCase() === "admin");
+  const roles = rawUserRoles(user);
+  return roles.includes("admin") || roles.some((role) => SUPER_ADMIN_ROLES.has(role));
 }
 
 function userHasAnyRole(user, roles) {
-  const userRoles = parseRoles(user?.roles?.length ? user.roles : user?.role).map((role) => String(role).toLowerCase());
+  const userRoles = rawUserRoles(user);
   const wanted = roles.map((role) => String(role).toLowerCase());
   return userRoles.some((role) => wanted.includes(role));
 }
@@ -850,6 +869,10 @@ exports.resetUserPassword = (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    if (isSuperAdminUser(target)) {
+      return rejectProtectedSuperAdmin(res);
+    }
+
     if (!isAdminActor(req.user) && isAdminUser(target)) {
       return res.status(403).json({ success: false, message: "Account role cannot reset admin passwords" });
     }
@@ -901,15 +924,19 @@ exports.getAllUsers = (req, res) => {
       GROUP BY u.id
       ORDER BY u.id DESC
     `).all().map((item) => {
-      const roles = normalizeRoleList(item.role);
+      const isSuperAdmin = isSuperAdminUser(item);
+      const roles = isSuperAdmin ? parseRoles(item.role).filter(Boolean) : normalizeRoleList(item.role);
       return {
         ...item,
         role: roles[0] || "user",
         roles,
+        is_super_admin: isSuperAdmin,
         assigned_groups: parseJsonArray(item.assigned_groups).filter(Boolean),
         assigned_labels: parseJsonArray(item.assigned_labels).filter(Boolean)
       };
-    }).filter((item) => actorIsAdmin || !item.roles.some((role) => String(role).toLowerCase() === "admin"));
+    })
+      .filter((item) => !item.is_super_admin)
+      .filter((item) => actorIsAdmin || !item.roles.some((role) => String(role).toLowerCase() === "admin"));
 
     res.json({
       success: true,
@@ -929,6 +956,9 @@ exports.updateUserRole = (req, res) => {
   try {
     const { id } = req.params;
     const requestedRoles = Array.isArray(req.body?.roles) ? req.body.roles : [req.body?.role];
+    if (requestedRoles.some((role) => SUPER_ADMIN_ROLES.has(String(role || "").trim().toLowerCase()))) {
+      return rejectProtectedSuperAdmin(res);
+    }
     const roles = normalizeRoleList(requestedRoles);
     const actorIsAdmin = isAdminActor(req.user);
     const actorIsAccountClaimManager = isAccountClaimManagerActor(req.user);
@@ -949,6 +979,10 @@ exports.updateUserRole = (req, res) => {
         success: false,
         message: "Không tìm thấy user"
       });
+    }
+
+    if (isSuperAdminUser(user)) {
+      return rejectProtectedSuperAdmin(res);
     }
 
     if (!actorIsAdmin && isAdminUser(user)) {
@@ -1036,6 +1070,10 @@ exports.updateUserStatus = (req, res) => {
       });
     }
 
+    if (isSuperAdminUser(user)) {
+      return rejectProtectedSuperAdmin(res);
+    }
+
     if (!isAdminActor(req.user) && isAdminUser(user)) {
       return res.status(403).json({
         success: false,
@@ -1081,6 +1119,10 @@ exports.updateUserGroups = (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    if (isSuperAdminUser(user)) {
+      return rejectProtectedSuperAdmin(res);
+    }
+
     if (!isAdminActor(req.user) && isAdminUser(user)) {
       return res.status(403).json({ success: false, message: "Account role cannot update admin users" });
     }
@@ -1122,6 +1164,10 @@ exports.updateUserContentIdLabels = (req, res) => {
     const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (isSuperAdminUser(user)) {
+      return rejectProtectedSuperAdmin(res);
     }
 
     if (!isAdminActor(req.user) && isAdminUser(user)) {
@@ -1176,6 +1222,10 @@ exports.deleteUser = (req, res) => {
         success: false,
         message: "KhÃ´ng tÃ¬m tháº¥y user"
       });
+    }
+
+    if (isSuperAdminUser(target)) {
+      return rejectProtectedSuperAdmin(res);
     }
 
     if (!isAdminActor(req.user) && isAdminUser(target)) {
