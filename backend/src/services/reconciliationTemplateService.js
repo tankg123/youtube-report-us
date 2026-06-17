@@ -280,6 +280,268 @@ function findItemsTemplateRow(ws) {
   return found;
 }
 
+function cloneStyle(sourceCell, targetCell) {
+  targetCell.style = JSON.parse(JSON.stringify(sourceCell.style || {}));
+  targetCell.numFmt = sourceCell.numFmt;
+  targetCell.alignment = sourceCell.alignment ? { ...sourceCell.alignment } : targetCell.alignment;
+  targetCell.font = sourceCell.font ? { ...sourceCell.font } : targetCell.font;
+  targetCell.fill = sourceCell.fill ? { ...sourceCell.fill } : targetCell.fill;
+  targetCell.border = sourceCell.border ? { ...sourceCell.border } : targetCell.border;
+}
+
+function copyCell(sourceCell, targetCell) {
+  cloneStyle(sourceCell, targetCell);
+  targetCell.value = cloneCellValue(sourceCell.value);
+}
+
+function cloneCellValue(value) {
+  if (value == null) return value;
+  if (value instanceof Date) return new Date(value.getTime());
+  if (typeof value !== "object") return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function snapshotRows(ws, startRow, endRow, maxCol) {
+  const rows = [];
+  const merges = [];
+
+  for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
+    const row = ws.getRow(rowNumber);
+    const cells = [];
+
+    for (let col = 1; col <= maxCol; col += 1) {
+      const cell = row.getCell(col);
+      cells.push({
+        col,
+        value: cloneCellValue(cell.value),
+        style: JSON.parse(JSON.stringify(cell.style || {})),
+        numFmt: cell.numFmt,
+        isMaster: cell.type !== EXCELJS_MERGE_CELL_TYPE
+      });
+    }
+
+    rows.push({
+      rowNumber,
+      height: row.height,
+      cells
+    });
+  }
+
+  for (const key of Object.keys(getMerges(ws))) {
+    const entry = getMerges(ws)[key];
+    const merge = entry?.model || entry;
+    if (!merge) continue;
+
+    if (merge.top >= startRow && merge.bottom <= endRow) {
+      merges.push({
+        top: merge.top,
+        left: merge.left,
+        bottom: merge.bottom,
+        right: merge.right
+      });
+    }
+  }
+
+  return {
+    startRow,
+    endRow,
+    maxCol,
+    rows,
+    merges
+  };
+}
+
+function restoreRows(ws, snapshot, clearMaxCol, rowOffset = 0) {
+  if (!snapshot) return;
+  const raw = getMerges(ws);
+  const startRow = snapshot.startRow + rowOffset;
+  const endRow = snapshot.endRow + rowOffset;
+  const overlappingMerges = [];
+
+  for (const key of Object.keys(raw)) {
+    const entry = raw[key];
+    const merge = entry?.model || entry;
+    if (!merge) continue;
+
+    if (merge.top <= endRow && merge.bottom >= startRow) {
+      overlappingMerges.push({ key, ...merge });
+    }
+  }
+
+  for (const merge of overlappingMerges) {
+    try {
+      ws.unMergeCells(`${ws.getCell(merge.top, merge.left).address}:${ws.getCell(merge.bottom, merge.right).address}`);
+    } catch {
+      delete raw[merge.key];
+    }
+  }
+
+  for (let rowNumber = startRow; rowNumber <= endRow; rowNumber += 1) {
+    const row = ws.getRow(rowNumber);
+    for (let col = 1; col <= clearMaxCol; col += 1) {
+      const cell = row.getCell(col);
+      cell.value = null;
+      cell.style = {};
+    }
+  }
+
+  for (const rowSnapshot of snapshot.rows) {
+    const row = ws.getRow(rowSnapshot.rowNumber + rowOffset);
+    row.height = rowSnapshot.height;
+
+    for (const cellSnapshot of rowSnapshot.cells) {
+      const cell = row.getCell(cellSnapshot.col);
+      cell.style = JSON.parse(JSON.stringify(cellSnapshot.style || {}));
+      cell.numFmt = cellSnapshot.numFmt;
+      if (cellSnapshot.isMaster) cell.value = cloneCellValue(cellSnapshot.value);
+    }
+  }
+
+  for (const merge of snapshot.merges) {
+    clearOverlappingRowMerges(ws, merge.top + rowOffset, merge.left, merge.right);
+    ws.mergeCells(merge.top + rowOffset, merge.left, merge.bottom + rowOffset, merge.right);
+  }
+}
+
+function clearColumnsOutsideRows(ws, startCol, endCol, protectedStartRow, protectedEndRow) {
+  if (!startCol || !endCol || startCol > endCol) return;
+  const raw = getMerges(ws);
+  const overlappingMerges = [];
+
+  for (const key of Object.keys(raw)) {
+    const entry = raw[key];
+    const merge = entry?.model || entry;
+    if (!merge) continue;
+
+    const overlapsColumns = merge.left <= endCol && merge.right >= startCol;
+    const outsideProtectedRows = merge.bottom < protectedStartRow || merge.top > protectedEndRow;
+    if (overlapsColumns && outsideProtectedRows) overlappingMerges.push({ key, ...merge });
+  }
+
+  for (const merge of overlappingMerges) {
+    try {
+      ws.unMergeCells(`${ws.getCell(merge.top, merge.left).address}:${ws.getCell(merge.bottom, merge.right).address}`);
+    } catch {
+      delete raw[merge.key];
+    }
+  }
+
+  const lastRow = Math.max(ws.rowCount || 0, ws.actualRowCount || 0);
+  for (let rowNumber = 1; rowNumber <= lastRow; rowNumber += 1) {
+    if (rowNumber >= protectedStartRow && rowNumber <= protectedEndRow) continue;
+    const row = ws.getRow(rowNumber);
+
+    for (let col = startCol; col <= endCol; col += 1) {
+      const cell = row.getCell(col);
+      cell.value = null;
+      cell.style = {};
+    }
+  }
+}
+
+function insertRevenueTaxExportColumns(ws, templateRow) {
+  const template = ws.getRow(templateRow);
+  let totalStartCol = null;
+  let totalEndCol = null;
+
+  template.eachCell({ includeEmpty: true }, (cell, col) => {
+    if (typeof cell.value === "string" && cell.value.includes("${table.items.total_usd}")) {
+      if (totalStartCol == null) totalStartCol = col;
+      totalEndCol = col;
+    }
+  });
+
+  if (totalStartCol == null || totalEndCol == null) return;
+
+  const insertAt = totalEndCol + 1;
+  const insertedColumnCount = 4;
+  const originalLastCol = totalEndCol + 3;
+  const shiftedLastCol = originalLastCol + insertedColumnCount;
+
+  const headerGroupRow = templateRow - 3;
+  const headerRow = templateRow - 2;
+  const formulaRow = templateRow - 1;
+  const tableRows = [headerGroupRow, headerRow, formulaRow, templateRow];
+  const inserted = [
+    { header: "Revenue US", placeholder: "${table.items.revenue_us}" },
+    { header: "Tax US", placeholder: "${table.items.tax_us}" },
+    { header: "Revenue BR", placeholder: "${table.items.revenue_br}" },
+    { header: "Tax BR", placeholder: "${table.items.tax_br}" }
+  ];
+
+  const headerStyleSource = ws.getCell(headerRow, totalStartCol);
+  const itemStyleSource = ws.getCell(templateRow, totalStartCol);
+  const formulaStyleSource = ws.getCell(formulaRow, totalStartCol);
+  const groupStyleSource = ws.getCell(headerGroupRow, totalStartCol);
+
+  for (const rowNumber of tableRows) {
+    clearOverlappingRowMerges(ws, rowNumber, insertAt, shiftedLastCol);
+
+    for (let col = originalLastCol; col >= insertAt; col -= 1) {
+      const sourceCell = ws.getCell(rowNumber, col);
+      const targetCell = ws.getCell(rowNumber, col + insertedColumnCount);
+      copyCell(sourceCell, targetCell);
+      sourceCell.value = null;
+      sourceCell.style = {};
+    }
+  }
+
+  inserted.forEach((column, index) => {
+    const col = insertAt + index;
+    ws.getColumn(col).width = 14;
+
+    const groupCell = ws.getCell(headerGroupRow, col);
+    cloneStyle(groupStyleSource, groupCell);
+
+    const headerCell = ws.getCell(headerRow, col);
+    cloneStyle(headerStyleSource, headerCell);
+    headerCell.value = column.header;
+
+    const formulaCell = ws.getCell(formulaRow, col);
+    cloneStyle(formulaStyleSource, formulaCell);
+    formulaCell.value = "";
+
+    const itemCell = ws.getCell(templateRow, col);
+    cloneStyle(itemStyleSource, itemCell);
+    itemCell.value = column.placeholder;
+    itemCell.numFmt = "#,##0.00";
+  });
+
+  clearOverlappingRowMerges(ws, headerGroupRow, totalStartCol, shiftedLastCol);
+  ws.mergeCells(headerGroupRow, totalStartCol, headerGroupRow, shiftedLastCol);
+
+  return {
+    rightCol: shiftedLastCol
+  };
+}
+
+function extendRevenueTaxFooterSummary(ws, templateRow, itemCount, rightCol) {
+  const valueStartCol = 8;
+  const firstSummaryRow = templateRow + itemCount + 2;
+
+  for (let rowNumber = firstSummaryRow; rowNumber < firstSummaryRow + 4; rowNumber += 1) {
+    const sourceCell = ws.getCell(rowNumber, valueStartCol);
+    const value = cloneCellValue(sourceCell.value);
+    const styleSource = ws.getCell(rowNumber, valueStartCol);
+
+    clearOverlappingRowMerges(ws, rowNumber, valueStartCol, rightCol);
+
+    for (let col = valueStartCol; col <= rightCol; col += 1) {
+      const cell = ws.getCell(rowNumber, col);
+      cloneStyle(styleSource, cell);
+      cell.value = null;
+    }
+
+    const targetCell = ws.getCell(rowNumber, valueStartCol);
+    targetCell.value = value;
+    targetCell.alignment = {
+      ...(targetCell.alignment || {}),
+      horizontal: "right"
+    };
+    ws.mergeCells(rowNumber, valueStartCol, rowNumber, rightCol);
+  }
+}
+
 function replacePlaceholders(ws, payload, item) {
   ws.eachRow({ includeEmpty: true }, (row) => {
     row.eachCell({ includeEmpty: true }, (cell) => {
@@ -351,6 +613,10 @@ function makePayload(detail, company, options = {}) {
         yt_channels_id: safeStr(channel.channel_id),
         network: safeStr(channel.network_name || "-"),
         total_usd: round2(channel.revenue_usd),
+        revenue_us: round2(channel.revenue_us),
+        tax_us: round2(toNumber(channel.revenue_us) * 0.3),
+        revenue_br: round2(channel.revenue_br),
+        tax_br: round2(toNumber(channel.revenue_br) * 0.14),
         share_rate: `${round2(channel.applied_share)}%`,
         payout_value: currency === "USD" ? round2(channel.share_amount) : toNumber(channel.paid ?? channel.share_amount_converted),
         payout_usd: round2(channel.share_amount),
@@ -393,25 +659,33 @@ async function generateGroupReconciliationExcel(detail, company, options = {}) {
   for (const ws of workbook.worksheets) {
     ws.name = safeStr(detail.partner_name || detail.group_name || "Reconciliation").slice(0, 31) || "Reconciliation";
     const templateRow = findItemsTemplateRow(ws);
+    const includeRevenueTaxColumns = Boolean(options.export_us_br || options.exportUsBr);
+    let taxColumnState = null;
     const items = payload.table.items.length > 0
       ? payload.table.items
-      : [{
+        : [{
           no: 1,
           channel: "",
           yt_channels_id: "",
           network: "",
           total_usd: 0,
+          revenue_us: 0,
+          tax_us: 0,
+          revenue_br: 0,
+          tax_br: 0,
           share_rate: "",
           payout_value: 0,
           note: ""
         }];
 
     if (templateRow) {
+      if (includeRevenueTaxColumns) taxColumnState = insertRevenueTaxExportColumns(ws, templateRow);
       const snapshot = snapshotRow(ws, templateRow);
+      const insertedItemRows = Math.max(items.length - 1, 0);
 
-      if (items.length > 1) {
-        ws.spliceRows(templateRow + 1, 0, ...new Array(items.length - 1).fill([]));
-        shiftMergesDown(ws, templateRow, items.length - 1);
+      if (insertedItemRows > 0) {
+        ws.spliceRows(templateRow + 1, 0, ...new Array(insertedItemRows).fill([]));
+        shiftMergesDown(ws, templateRow, insertedItemRows);
 
         for (let index = 1; index < items.length; index += 1) {
           applySnapshotToRow(ws, templateRow + index, snapshot);
@@ -430,6 +704,9 @@ async function generateGroupReconciliationExcel(detail, company, options = {}) {
     }
 
     replacePlaceholders(ws, payload);
+    if (taxColumnState?.rightCol) {
+      extendRevenueTaxFooterSummary(ws, templateRow, items.length, taxColumnState.rightCol);
+    }
   }
 
   const buffer = await workbook.xlsx.writeBuffer();

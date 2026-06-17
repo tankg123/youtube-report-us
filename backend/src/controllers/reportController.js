@@ -876,8 +876,8 @@ function buildReconciliationWorkbook(detail, company) {
   return workbook;
 }
 
-async function sendExcelExport(res, detail, company) {
-  const buffer = await generateGroupReconciliationExcel(detail, company);
+async function sendExcelExport(res, detail, company, options = {}) {
+  const buffer = await generateGroupReconciliationExcel(detail, company, options);
   const fileName = `${safeFileName(detail.group_name || "group")}-${detail.month || "report"}.xlsx`;
   setDownloadHeaders(res, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
   res.send(buffer);
@@ -2942,7 +2942,9 @@ exports.exportGroupExcel = async (req, res) => {
     }
     const detail = groupDetail(req.params.id, String(req.body?.month || req.query.month || ""));
     if (!detail) return res.status(404).json({ success: false, message: "Group not found" });
-    await sendExcelExport(res, detail, selectedCompany(req.body?.company_id || req.query.company_id));
+    await sendExcelExport(res, detail, selectedCompany(req.body?.company_id || req.query.company_id), {
+      export_us_br: Boolean(req.body?.export_us_br || req.query.export_us_br)
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not export Excel", error: error.message });
   }
