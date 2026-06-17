@@ -773,6 +773,7 @@ export default function GroupChannelPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [includeSignatureBoxes, setIncludeSignatureBoxes] = useState(false);
+  const [exportUsBr, setExportUsBr] = useState(false);
   const [groupListCollapsed, setGroupListCollapsed] = useState(false);
   const [groupSearch, setGroupSearch] = useState("");
   const [groupSortDirection, setGroupSortDirection] = useState("asc");
@@ -1070,7 +1071,8 @@ export default function GroupChannelPage() {
 
       const res = await api.post(`/reports/groups/${detail.id}/export/${format}`, {
         month,
-        company_id: selectedCompanyId || selectedCompany()?.id || ""
+        company_id: selectedCompanyId || selectedCompany()?.id || "",
+        export_us_br: exportUsBr
       }, {
         responseType: "blob",
         timeout: 60000,
@@ -1586,6 +1588,18 @@ export default function GroupChannelPage() {
                 <span>
                   <span className="block font-black text-slate-900">Include signature boxes in PDF</span>
                   <span className="block text-sm text-slate-500 mt-1">Add company and partner signature areas with Sign, Name, and Title lines.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={exportUsBr}
+                  onChange={(event) => setExportUsBr(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                />
+                <span>
+                  <span className="block font-black text-slate-900">Export US - BR in Excel</span>
+                  <span className="block text-sm text-slate-500 mt-1">Add Revenue US, Tax US, Revenue BR, and Tax BR beside Revenue Total.</span>
                 </span>
               </label>
             </div>
