@@ -23,8 +23,8 @@ const apiKeyMiddleware = require("./middlewares/apiKeyMiddleware");
 
 const app = express();
 
-const PORT = process.env.PORT || 4015;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const PORT = process.env.PORT || 4025;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5176";
 
 app.use(
   helmet({
@@ -34,7 +34,7 @@ app.use(
 
 app.use(
   cors({
-    origin: [FRONTEND_URL, "http://localhost:5173", "http://192.168.1.179:5173"],
+    origin: [FRONTEND_URL, "http://localhost:5176", "http://192.168.1.179:5176"],
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"]
   })

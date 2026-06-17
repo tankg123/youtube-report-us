@@ -254,7 +254,7 @@ export default function ManagerReportPage() {
           </div>
           <h1 className="text-3xl lg:text-4xl font-black text-slate-900">Manager Report</h1>
           <p className="text-slate-500 mt-2">
-            Import file gồm Channel ID và Revenue. Channel ID thiếu UC sẽ được tự bổ sung trước khi cập nhật YouTube Data API v3.
+            Import file chuẩn gồm Channel ID, Revenue, Revenue US và Revenue BR.
           </p>
         </div>
 
@@ -403,7 +403,7 @@ export default function ManagerReportPage() {
         </button>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4 mb-6">
+      <div className="grid md:grid-cols-5 gap-4 mb-6">
         <div className="bg-slate-900 text-white rounded-3xl p-5 shadow-sm">
           <p className="text-sm text-slate-300">Tháng</p>
           <p className="text-3xl font-black mt-4">{month}</p>
@@ -415,6 +415,14 @@ export default function ManagerReportPage() {
         <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
           <p className="text-sm text-slate-500">Total Revenue</p>
           <p className="text-3xl font-black mt-4 text-emerald-700">{money(summary.total_revenue)}</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Revenue US</p>
+          <p className="text-3xl font-black mt-4 text-blue-700">{money(summary.total_revenue_us || 0)}</p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm">
+          <p className="text-sm text-slate-500">Revenue BR</p>
+          <p className="text-3xl font-black mt-4 text-indigo-700">{money(summary.total_revenue_br || 0)}</p>
         </div>
       </div>
 
@@ -518,6 +526,8 @@ export default function ManagerReportPage() {
                   <th className="text-left px-5 py-3">Network</th>
                   <th className="text-left px-5 py-3">Channel ID</th>
                   <th className="text-right px-5 py-3">Revenue</th>
+                  <th className="text-right px-5 py-3">Revenue US</th>
+                  <th className="text-right px-5 py-3">Revenue BR</th>
                   <th className="text-left px-5 py-3">File</th>
                 </tr>
               </thead>
@@ -533,6 +543,8 @@ export default function ManagerReportPage() {
                     <td className="px-5 py-4 text-slate-600">{row.network_name || "-"}</td>
                     <td className="px-5 py-4 font-mono text-xs text-emerald-700">{row.channel_id}</td>
                     <td className="px-5 py-4 text-right font-black">{money(row.revenue)}</td>
+                    <td className="px-5 py-4 text-right font-black text-blue-700">{money(row.revenue_us || 0)}</td>
+                    <td className="px-5 py-4 text-right font-black text-indigo-700">{money(row.revenue_br || 0)}</td>
                     <td className="px-5 py-4 text-slate-500">{row.source_file || "-"}</td>
                   </tr>
                 ))}

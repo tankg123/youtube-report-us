@@ -206,6 +206,8 @@ db.exec(`
     network_id INTEGER,
     channel_id TEXT NOT NULL,
     revenue REAL NOT NULL DEFAULT 0,
+    revenue_us REAL NOT NULL DEFAULT 0,
+    revenue_br REAL NOT NULL DEFAULT 0,
     source_file TEXT,
     import_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -259,6 +261,7 @@ db.exec(`
     group_name TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'USD',
     fee_rate REAL NOT NULL DEFAULT 0,
+    apply_revenue_tax INTEGER NOT NULL DEFAULT 0,
     description TEXT,
     tiers TEXT NOT NULL DEFAULT '[]',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -729,12 +732,20 @@ const hasGroupFeeRate = groupColumns.some((column) => column.name === "fee_rate"
 if (!hasGroupFeeRate) {
   db.exec("ALTER TABLE channel_groups ADD COLUMN fee_rate REAL NOT NULL DEFAULT 0");
 }
+const hasGroupRevenueTax = groupColumns.some((column) => column.name === "apply_revenue_tax");
+if (!hasGroupRevenueTax) {
+  db.exec("ALTER TABLE channel_groups ADD COLUMN apply_revenue_tax INTEGER NOT NULL DEFAULT 0");
+}
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_channel_network_history_channel_month ON channel_network_history(channel_id, start_month)");
 
 const revenueColumns = db.prepare("PRAGMA table_info(channel_revenues)").all();
 const hasRevenueNetwork = revenueColumns.some((column) => column.name === "network_id");
 const hasRevenueImport = revenueColumns.some((column) => column.name === "import_id");
+const hasRevenueUs = revenueColumns.some((column) => column.name === "revenue_us");
+const hasRevenueBr = revenueColumns.some((column) => column.name === "revenue_br");
+const hasRevenueUsTaxBase = revenueColumns.some((column) => column.name === "revenue_us_tax_base");
+const hasRevenueBrTaxBase = revenueColumns.some((column) => column.name === "revenue_br_tax_base");
 
 if (!hasRevenueNetwork) {
   db.exec("ALTER TABLE channel_revenues ADD COLUMN network_id INTEGER");
@@ -742,6 +753,20 @@ if (!hasRevenueNetwork) {
 
 if (!hasRevenueImport) {
   db.exec("ALTER TABLE channel_revenues ADD COLUMN import_id INTEGER");
+}
+
+if (!hasRevenueUs) {
+  db.exec("ALTER TABLE channel_revenues ADD COLUMN revenue_us REAL NOT NULL DEFAULT 0");
+  if (hasRevenueUsTaxBase) {
+    db.exec("UPDATE channel_revenues SET revenue_us = revenue_us_tax_base WHERE revenue_us = 0");
+  }
+}
+
+if (!hasRevenueBr) {
+  db.exec("ALTER TABLE channel_revenues ADD COLUMN revenue_br REAL NOT NULL DEFAULT 0");
+  if (hasRevenueBrTaxBase) {
+    db.exec("UPDATE channel_revenues SET revenue_br = revenue_br_tax_base WHERE revenue_br = 0");
+  }
 }
 
 const revenueIndexes = db.prepare("PRAGMA index_list(channel_revenues)").all();
@@ -761,6 +786,8 @@ if (hasOldMonthChannelUnique) {
       network_id INTEGER,
       channel_id TEXT NOT NULL,
       revenue REAL NOT NULL DEFAULT 0,
+      revenue_us REAL NOT NULL DEFAULT 0,
+      revenue_br REAL NOT NULL DEFAULT 0,
       source_file TEXT,
       import_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -768,9 +795,9 @@ if (hasOldMonthChannelUnique) {
     );
 
     INSERT INTO channel_revenues (
-      id, month, network_id, channel_id, revenue, source_file, import_id, created_at, updated_at
+      id, month, network_id, channel_id, revenue, revenue_us, revenue_br, source_file, import_id, created_at, updated_at
     )
-    SELECT id, month, network_id, channel_id, revenue, source_file, import_id, created_at, updated_at
+    SELECT id, month, network_id, channel_id, revenue, revenue_us, revenue_br, source_file, import_id, created_at, updated_at
     FROM channel_revenues_old;
 
     DROP TABLE channel_revenues_old;

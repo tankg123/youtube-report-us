@@ -76,7 +76,7 @@ export default function ExchangeRatePage() {
       let rows = Array.isArray(res.data.data) ? res.data.data : [];
 
       if (rows.length === 0) {
-        const fallback = await api.get("http://localhost:4015/api/reports/exchange-rates");
+        const fallback = await api.get("http://localhost:4025/api/reports/exchange-rates");
         rows = Array.isArray(fallback.data.data) ? fallback.data.data : rows;
       }
 

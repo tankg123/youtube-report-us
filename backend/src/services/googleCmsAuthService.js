@@ -23,7 +23,7 @@ function getOAuthConfig() {
   const redirectUri =
     process.env.GOOGLE_OAUTH_REDIRECT_URI ||
     process.env.GOOGLE_CMS_REDIRECT_URI ||
-    `${process.env.BACKEND_PUBLIC_URL || "http://localhost:4015"}/api/reports/networks/cms-auth/callback`;
+    `${process.env.BACKEND_PUBLIC_URL || "http://localhost:4025"}/api/reports/networks/cms-auth/callback`;
 
   return { clientId, clientSecret, redirectUri };
 }

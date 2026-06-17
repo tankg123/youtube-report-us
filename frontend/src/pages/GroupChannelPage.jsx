@@ -9,6 +9,7 @@ const emptyGroup = {
   group_name: "",
   currency: "USD",
   fee_rate: 0,
+  apply_revenue_tax: false,
   description: "",
   tiers: []
 };
@@ -680,6 +681,18 @@ function GroupForm({ partners, value, onChange }) {
           <span className="text-xs font-black uppercase text-slate-400 mb-2 block">Mô tả</span>
           <input value={value.description} onChange={(e) => onChange({ ...value, description: e.target.value })} className="w-full rounded-2xl border border-slate-300 px-4 py-3" placeholder="Mô tả ngắn về group này..." />
         </label>
+        <label className="flex min-h-[62px] items-center gap-3 rounded-2xl border border-slate-300 px-4 py-3">
+          <input
+            type="checkbox"
+            checked={Boolean(value.apply_revenue_tax)}
+            onChange={(e) => onChange({ ...value, apply_revenue_tax: e.target.checked })}
+            className="h-5 w-5 rounded border-slate-300 text-emerald-600"
+          />
+          <span>
+            <span className="block text-sm font-black text-slate-900">Tính thuế US / BR</span>
+            <span className="block text-xs text-slate-500">Trừ US 30% và Brazil 14% trước khi chia sharing.</span>
+          </span>
+        </label>
       </div>
 
       <div className="border border-slate-200 rounded-3xl overflow-hidden">
@@ -809,6 +822,8 @@ export default function GroupChannelPage() {
     return rows;
   }, [detail?.channels, channelSearch, channelSort]);
 
+  const detailUsesRevenueTax = Number(detail?.apply_revenue_tax || 0) === 1;
+
   const filteredSortedGroups = useMemo(() => {
     const keyword = groupSearch.trim().toLowerCase();
     const rows = groups.filter((group) => {
@@ -873,6 +888,7 @@ export default function GroupChannelPage() {
       group_name: detail.group_name,
       currency: detail.currency,
       fee_rate: detail.fee_rate ?? 0,
+      apply_revenue_tax: Number(detail.apply_revenue_tax || 0) === 1,
       description: detail.description || "",
       tiers: detail.tiers?.length ? detail.tiers : []
     });
@@ -899,6 +915,7 @@ export default function GroupChannelPage() {
       const payload = {
         ...groupForm,
         fee_rate: Number(groupForm.fee_rate || 0),
+        apply_revenue_tax: groupForm.apply_revenue_tax ? 1 : 0,
         tiers: groupForm.tiers.map((tier) => ({
           min: Number(tier.min || 0),
           max: Number(tier.max || 0),
@@ -1264,6 +1281,9 @@ export default function GroupChannelPage() {
                     <p className="text-slate-500"><b className="text-slate-800">Account:</b> {detail.account_number || "-"}</p>
                     <p className="text-slate-500"><b className="text-slate-800">Currency:</b> {detail.currency}</p>
                     <p className="text-slate-500"><b className="text-slate-800">Fee:</b> {detail.fee_rate || 0}%</p>
+                    <p className="text-slate-500">
+                      <b className="text-slate-800">Revenue tax:</b> {detailUsesRevenueTax ? "US 30% / BR 14%" : "Off"}
+                    </p>
                     {detail.currency !== "USD" && (
                       <p className={detail.exchange_rate?.missing ? "text-red-600" : "text-slate-500"}>
                         <b className="text-slate-800">Exchange:</b> 1 USD = {detail.exchange_rate?.factor || 1} {detail.currency}
@@ -1360,6 +1380,12 @@ export default function GroupChannelPage() {
                           <th className="text-right px-5 py-3">
                             <SortButton label="Revenue USD" active={channelSort.key === "revenue"} direction={channelSort.direction} onClick={() => toggleChannelSort("revenue")} align="right" />
                           </th>
+                          {detailUsesRevenueTax && (
+                            <>
+                              <th className="text-right px-5 py-3">Revenue US</th>
+                              <th className="text-right px-5 py-3">Revenue BR</th>
+                            </>
+                          )}
                           <th className="text-right px-5 py-3">
                             <SortButton label="Share Amount USD" active={channelSort.key === "share"} direction={channelSort.direction} onClick={() => toggleChannelSort("share")} align="right" />
                           </th>
@@ -1372,7 +1398,7 @@ export default function GroupChannelPage() {
                       <tbody className="divide-y divide-slate-100">
                         {sortedDetailChannels.length === 0 && (
                           <tr>
-                            <td colSpan={canViewReports ? 5 : 4} className="px-5 py-10 text-center text-slate-500">
+                            <td colSpan={(canViewReports ? 5 : 4) + (detailUsesRevenueTax ? 2 : 0)} className="px-5 py-10 text-center text-slate-500">
                               No channels match this search.
                             </td>
                           </tr>
@@ -1411,6 +1437,18 @@ export default function GroupChannelPage() {
                               </div>
                             </td>
                             <td className="px-5 py-4 text-right font-black">{usd(channel.revenue_usd ?? channel.revenue)}</td>
+                            {detailUsesRevenueTax && (
+                              <>
+                                <td className="px-5 py-4 text-right">
+                                  <p className="font-black text-blue-700">{usd(channel.revenue_us || 0)}</p>
+                                  <p className="mt-1 text-[11px] font-bold text-red-500">tax us: {usd(channel.tax_us || 0)}</p>
+                                </td>
+                                <td className="px-5 py-4 text-right">
+                                  <p className="font-black text-indigo-700">{usd(channel.revenue_br || 0)}</p>
+                                  <p className="mt-1 text-[11px] font-bold text-red-500">tax br: {usd(channel.tax_br || 0)}</p>
+                                </td>
+                              </>
+                            )}
                             <td className="px-5 py-4 text-right font-black text-slate-900">{usd(channel.share_amount)}</td>
                             <td className="px-5 py-4 text-right font-black text-emerald-700">{converted(channel.paid ?? channel.share_amount_converted ?? channel.share_amount, detail.currency)}</td>
                             {canViewReports && (
